@@ -1,0 +1,29 @@
+---
+description: Rules for building the Python FastAPI backend
+globs: "backend/**/*"
+---
+
+# Backend Standards (Python FastAPI)
+
+## Tech Stack
+- Python 3.11+
+- FastAPI
+- Uvicorn (ASGI server)
+- Pydantic v2 (Data validation)
+- Image Processing: Use `Pillow` (PIL) for image handling.
+- AI Vision: Pass image buffers directly to Gemini using the modern `google-genai` SDK multimedia format.
+
+## AI Configuration
+- Use the official Google GenAI SDK (`google-genai`).
+- Target model: `gemini-1.5-flash`.
+- Keep AI prompt templates isolated in a `backend/app/prompts.py` file.
+
+## Architecture & Conventions
+- Structure: `main.py` -> `routes/` -> `services/` (AI logic).
+- Always use typed definitions and Pydantic schemas for request/response payloads.
+- Use explicit `try/except` blocks for handling AI API call failures and return clear HTTP 500 status codes if the AI fails.
+
+## Testing Standards
+- Use `pytest` for all backend tests.
+- Place all tests inside a `/backend/tests/` directory mirroring the app structure.
+

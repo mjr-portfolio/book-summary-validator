@@ -1,0 +1,22 @@
+---
+description: Rules for building the React frontend web application
+globs: "frontend/**/*"
+---
+
+# Frontend Standards
+
+## Tech Stack
+- React 19 (Vite)
+- TypeScript (Strict mode)
+- Tailwind CSS
+
+## Architecture & Conventions
+- Use functional components with arrow functions.
+- Keep components modular; place shared UI components in `frontend/src/components/ui/`.
+- Prioritize native hooks (`useState`, `useEffect`, `useMemo`) for local state management.
+- Always implement clean, responsive layouts using Tailwind CSS.
+
+## Testing Standards
+- Use `Vitest` and `React Testing Library`.
+- Place tests alongside components using the `.test.tsx` naming convention.
+
