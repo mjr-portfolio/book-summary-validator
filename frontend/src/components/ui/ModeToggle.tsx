@@ -1,4 +1,4 @@
-type InputMode = 'text' | 'image'
+type InputMode = 'text' | 'image' | 'lookup'
 
 type ModeToggleProps = {
   mode: InputMode
@@ -8,6 +8,7 @@ type ModeToggleProps = {
 const modes: { id: InputMode; label: string }[] = [
   { id: 'text', label: 'Paste Text Block' },
   { id: 'image', label: 'Upload Book Photo' },
+  { id: 'lookup', label: 'Book Lookup' },
 ]
 
 const ModeToggle = ({ mode, onChange }: ModeToggleProps) => {
@@ -15,7 +16,7 @@ const ModeToggle = ({ mode, onChange }: ModeToggleProps) => {
     <div
       role="tablist"
       aria-label="Input mode"
-      className="mx-auto mb-8 flex w-full max-w-xl rounded-lg border border-gray-200 bg-white p-1 shadow-sm"
+      className="mx-auto mb-8 flex w-full max-w-2xl rounded-lg border border-gray-200 bg-white p-1 shadow-sm"
     >
       {modes.map(({ id, label }) => {
         const isActive = mode === id

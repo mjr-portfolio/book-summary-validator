@@ -7,7 +7,7 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from PIL import Image, UnidentifiedImageError
 
-from app.prompts import EXTRACT_TEXT_PROMPT, build_compare_prompt
+from app.prompts import EXTRACT_TEXT_PROMPT, build_book_lookup_prompt, build_compare_prompt
 from app.schemas.compare import CompareResponse
 
 MODEL = "gemini-flash-latest"
@@ -17,6 +17,41 @@ GEMINI_TIMEOUT_MS = "90000"
 
 class GeminiServiceError(Exception):
     """Raised when the Gemini API call fails or returns invalid data."""
+
+
+class BookKnowledgeNotFoundError(GeminiServiceError):
+    """Raised when Gemini cannot confidently identify the requested book or chapter."""
+
+
+_BOOK_NOT_FOUND_MARKERS = (
+    "cannot be identified",
+    "cannot identify",
+    "could not identify",
+    "could not find",
+    "could not locate",
+    "unable to identify",
+    "unable to find",
+    "unable to locate",
+    "not found",
+    "unrecognized",
+    "do not recognize",
+    "don't recognize",
+    "does not recognize",
+    "doesn't recognize",
+    "no such book",
+    "no such chapter",
+    "unknown book",
+    "unknown chapter",
+    "page-based lookup is unsupported",
+    "cannot confidently",
+    "insufficient knowledge",
+    "not familiar with",
+)
+
+
+def _looks_like_book_not_found(summary: str) -> bool:
+    lowered = summary.lower()
+    return any(marker in lowered for marker in _BOOK_NOT_FOUND_MARKERS)
 
 
 def _get_client() -> genai.Client:
@@ -65,6 +100,8 @@ def _wrap_gemini_errors(func):
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
+        except BookKnowledgeNotFoundError:
+            raise
         except GeminiServiceError:
             raise
         except genai_errors.ClientError as exc:
@@ -120,3 +157,37 @@ async def extract_text_from_image_async(image_bytes: bytes) -> str:
 
 async def compare_texts_async(book_text: str, user_summary: str) -> CompareResponse:
     return await asyncio.to_thread(compare_texts, book_text, user_summary)
+
+
+@_wrap_gemini_errors
+def fetch_book_knowledge_summary(title: str, author: str, chapter_or_section_name: str) -> str:
+    client = _get_client()
+    prompt = build_book_lookup_prompt(title, author, chapter_or_section_name)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+    )
+
+    summary = (response.text or "").strip()
+    if not summary:
+        raise GeminiServiceError("Empty book knowledge summary from lookup")
+
+    if _looks_like_book_not_found(summary):
+        raise BookKnowledgeNotFoundError(
+            "The AI could not confidently locate that book or chapter."
+        )
+
+    return summary
+
+
+async def fetch_book_knowledge_summary_async(
+    title: str,
+    author: str,
+    chapter_or_section_name: str,
+) -> str:
+    return await asyncio.to_thread(
+        fetch_book_knowledge_summary,
+        title,
+        author,
+        chapter_or_section_name,
+    )

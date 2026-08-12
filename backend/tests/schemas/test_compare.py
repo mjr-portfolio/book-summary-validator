@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.compare import CompareRequest, CompareResponse, ExtractTextResponse
+from app.schemas.compare import CompareRequest, CompareResponse, ExtractTextResponse, LookupTextResponse
 
 
 def test_compare_request_valid() -> None:
@@ -44,3 +44,13 @@ def test_extract_text_response_valid() -> None:
 def test_extract_text_response_rejects_empty_text() -> None:
     with pytest.raises(ValidationError):
         ExtractTextResponse(extracted_text="   ")
+
+
+def test_lookup_text_response_valid() -> None:
+    response = LookupTextResponse(extracted_text="Chapter summary from knowledge base.")
+    assert response.extracted_text == "Chapter summary from knowledge base."
+
+
+def test_lookup_text_response_rejects_empty_text() -> None:
+    with pytest.raises(ValidationError):
+        LookupTextResponse(extracted_text="   ")

@@ -149,3 +149,113 @@ def test_extract_text_endpoint_rejects_oversized_file(client) -> None:
 
     assert response.status_code == 422
     assert response.json()["detail"] == "image exceeds 10 MB limit"
+
+
+def test_lookup_text_endpoint_returns_result(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.routes.compare.fetch_book_knowledge_summary_async",
+        new_callable=AsyncMock,
+        return_value="Elizabeth meets Mr. Darcy at the ball.",
+    ) as mock_lookup:
+        response = client.post(
+            "/api/lookup-text",
+            data={
+                "book_title": "Pride and Prejudice",
+                "author": "Jane Austen",
+                "chapter_or_section_name": "Chapter 3",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["extracted_text"] == "Elizabeth meets Mr. Darcy at the ball."
+    mock_lookup.assert_called_once_with("Pride and Prejudice", "Jane Austen", "Chapter 3")
+
+
+def test_lookup_text_endpoint_rejects_empty_book_title(client) -> None:
+    response = client.post(
+        "/api/lookup-text",
+        data={
+            "book_title": "   ",
+            "author": "Jane Austen",
+            "chapter_or_section_name": "Chapter 3",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "book_title must not be empty"
+
+
+def test_lookup_text_endpoint_rejects_empty_author(client) -> None:
+    response = client.post(
+        "/api/lookup-text",
+        data={
+            "book_title": "Pride and Prejudice",
+            "author": "   ",
+            "chapter_or_section_name": "Chapter 3",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "author must not be empty"
+
+
+def test_lookup_text_endpoint_rejects_empty_section_name(client) -> None:
+    response = client.post(
+        "/api/lookup-text",
+        data={
+            "book_title": "Pride and Prejudice",
+            "author": "Jane Austen",
+            "chapter_or_section_name": "   ",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "chapter_or_section_name must not be empty"
+
+
+def test_lookup_text_endpoint_returns_429_on_service_error(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.gemini import GeminiServiceError
+
+    with patch(
+        "app.routes.compare.fetch_book_knowledge_summary_async",
+        new_callable=AsyncMock,
+        side_effect=GeminiServiceError("429 RESOURCE_EXHAUSTED quota exceeded"),
+    ):
+        response = client.post(
+            "/api/lookup-text",
+            data={
+                "book_title": "Pride and Prejudice",
+                "author": "Jane Austen",
+                "chapter_or_section_name": "Chapter 3",
+            },
+        )
+
+    assert response.status_code == 429
+
+
+def test_lookup_text_endpoint_returns_404_when_book_not_found(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.routes.compare import LOOKUP_NOT_FOUND_DETAIL
+    from app.services.gemini import BookKnowledgeNotFoundError
+
+    with patch(
+        "app.routes.compare.fetch_book_knowledge_summary_async",
+        new_callable=AsyncMock,
+        side_effect=BookKnowledgeNotFoundError("could not confidently locate"),
+    ):
+        response = client.post(
+            "/api/lookup-text",
+            data={
+                "book_title": "Fake Book",
+                "author": "Unknown Author",
+                "chapter_or_section_name": "Chapter 99",
+            },
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == LOOKUP_NOT_FOUND_DETAIL

@@ -2,8 +2,19 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.schemas.compare import CompareResponse, ExtractTextResponse
-from app.services.gemini import GeminiServiceError, compare_texts_async, extract_text_from_image_async
+from app.schemas.compare import CompareResponse, ExtractTextResponse, LookupTextResponse
+from app.services.gemini import (
+    BookKnowledgeNotFoundError,
+    GeminiServiceError,
+    compare_texts_async,
+    extract_text_from_image_async,
+    fetch_book_knowledge_summary_async,
+)
+
+LOOKUP_NOT_FOUND_DETAIL = (
+    "The AI could not confidently locate that book or chapter. "
+    "Please check your spelling and try again."
+)
 
 router = APIRouter(tags=["compare"])
 
@@ -32,7 +43,12 @@ def _raise_gemini_http_error(exc: GeminiServiceError) -> None:
             detail="Gemini request timed out. Please try again with shorter text.",
         ) from exc
 
-    if "invalid" in message or "unsupported image" in message or "empty text extraction" in message:
+    if (
+        "invalid" in message
+        or "unsupported image" in message
+        or "empty text extraction" in message
+        or "empty book knowledge summary" in message
+    ):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if "503" in message or "service unavailable" in message:
@@ -81,5 +97,31 @@ async def extract_text(image: UploadFile = File(...)) -> ExtractTextResponse:
     try:
         extracted = await extract_text_from_image_async(image_bytes)
         return ExtractTextResponse(extracted_text=extracted)
+    except GeminiServiceError as exc:
+        _raise_gemini_http_error(exc)
+
+
+@router.post("/lookup-text", response_model=LookupTextResponse)
+async def lookup_text(
+    book_title: Annotated[str, Form()],
+    author: Annotated[str, Form()],
+    chapter_or_section_name: Annotated[str, Form()],
+) -> LookupTextResponse:
+    title = book_title.strip()
+    author_name = author.strip()
+    section_name = chapter_or_section_name.strip()
+
+    if not title:
+        raise HTTPException(status_code=422, detail="book_title must not be empty")
+    if not author_name:
+        raise HTTPException(status_code=422, detail="author must not be empty")
+    if not section_name:
+        raise HTTPException(status_code=422, detail="chapter_or_section_name must not be empty")
+
+    try:
+        summary = await fetch_book_knowledge_summary_async(title, author_name, section_name)
+        return LookupTextResponse(extracted_text=summary)
+    except BookKnowledgeNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=LOOKUP_NOT_FOUND_DETAIL) from exc
     except GeminiServiceError as exc:
         _raise_gemini_http_error(exc)

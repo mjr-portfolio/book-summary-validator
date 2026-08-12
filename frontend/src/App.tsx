@@ -1,16 +1,20 @@
 import { useRef, useState } from 'react'
+import BookLookupForm from './components/ui/BookLookupForm'
 import ImageUpload from './components/ui/ImageUpload'
 import ModeToggle from './components/ui/ModeToggle'
-import { compareTexts, extractTextFromImage } from './lib/api'
+import { compareTexts, extractTextFromImage, lookupBookText } from './lib/api'
 import { compressImage } from './lib/compressImage'
 import type { CompareResponse } from './types/compare'
 
-type InputMode = 'text' | 'image'
+type InputMode = 'text' | 'image' | 'lookup'
 
 const App = () => {
   const [inputMode, setInputMode] = useState<InputMode>('text')
   const [bookText, setBookText] = useState('')
   const [bookImage, setBookImage] = useState<File | null>(null)
+  const [bookTitle, setBookTitle] = useState('')
+  const [author, setAuthor] = useState('')
+  const [chapterSectionName, setChapterSectionName] = useState('')
   const [extractedBookText, setExtractedBookText] = useState('')
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
@@ -20,11 +24,26 @@ const App = () => {
   const [isLoading, setIsLoading] = useState(false)
   const extractionRequestId = useRef(0)
 
+  const canEnterChapterSection =
+    bookTitle.trim().length > 0 && author.trim().length > 0
+
   const canCompare =
     userSummary.trim().length > 0 &&
     (inputMode === 'text'
       ? bookText.trim().length > 0
       : extractedBookText.trim().length > 0 && !isExtracting)
+
+  const resetExtractionState = () => {
+    extractionRequestId.current += 1
+    setExtractedBookText('')
+    setExtractionError(null)
+    setIsExtracting(false)
+  }
+
+  const handleModeChange = (mode: InputMode) => {
+    setInputMode(mode)
+    resetExtractionState()
+  }
 
   const handleImageSelected = async (file: File | null) => {
     setBookImage(file)
@@ -65,6 +84,76 @@ const App = () => {
     }
   }
 
+  const handleBookTitleChange = (value: string) => {
+    setBookTitle(value)
+    resetExtractionState()
+
+    const nextCanEnter =
+      value.trim().length > 0 && author.trim().length > 0
+    if (!nextCanEnter) {
+      setChapterSectionName('')
+    }
+  }
+
+  const handleAuthorChange = (value: string) => {
+    setAuthor(value)
+    resetExtractionState()
+
+    const nextCanEnter =
+      bookTitle.trim().length > 0 && value.trim().length > 0
+    if (!nextCanEnter) {
+      setChapterSectionName('')
+    }
+  }
+
+  const handleChapterSectionNameChange = (value: string) => {
+    if (!canEnterChapterSection) {
+      return
+    }
+
+    setChapterSectionName(value)
+    resetExtractionState()
+  }
+
+  const handleChapterSectionNameBlur = async () => {
+    const title = bookTitle.trim()
+    const authorName = author.trim()
+    const sectionName = chapterSectionName.trim()
+
+    if (!title || !authorName || !sectionName || !canEnterChapterSection) {
+      return
+    }
+
+    const requestId = ++extractionRequestId.current
+    setIsExtracting(true)
+    setExtractionError(null)
+    setExtractedBookText('')
+    setResult(null)
+    setError(null)
+
+    try {
+      const summary = await lookupBookText(title, authorName, sectionName)
+
+      if (requestId !== extractionRequestId.current) {
+        return
+      }
+
+      setExtractedBookText(summary)
+    } catch (err) {
+      if (requestId !== extractionRequestId.current) {
+        return
+      }
+
+      setExtractionError(
+        err instanceof Error ? err.message : 'Failed to fetch chapter summary. Please try again.',
+      )
+    } finally {
+      if (requestId === extractionRequestId.current) {
+        setIsExtracting(false)
+      }
+    }
+  }
+
   const handleCompare = async () => {
     if (!canCompare || isLoading) return
 
@@ -91,11 +180,12 @@ const App = () => {
             Book Summary Validator
           </h1>
           <p className="mt-2 text-gray-600">
-            Paste your book text or scan a photo, then compare it with your personal summary.
+            Paste text, scan a photo, or look up a chapter or section, then compare it with your
+            personal summary.
           </p>
         </header>
 
-        <ModeToggle mode={inputMode} onChange={setInputMode} />
+        <ModeToggle mode={inputMode} onChange={handleModeChange} />
 
         <div className="grid gap-6 lg:grid-cols-2">
           {inputMode === 'text' ? (
@@ -109,10 +199,24 @@ const App = () => {
                 className="w-full resize-y rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               />
             </label>
-          ) : (
+          ) : inputMode === 'image' ? (
             <ImageUpload
               file={bookImage}
               onFileChange={handleImageSelected}
+              disabled={isLoading}
+              isExtracting={isExtracting}
+              extractionError={extractionError}
+              isExtracted={Boolean(extractedBookText) && !isExtracting}
+            />
+          ) : (
+            <BookLookupForm
+              bookTitle={bookTitle}
+              author={author}
+              chapterSectionName={chapterSectionName}
+              onBookTitleChange={handleBookTitleChange}
+              onAuthorChange={handleAuthorChange}
+              onChapterSectionNameChange={handleChapterSectionNameChange}
+              onChapterSectionNameBlur={handleChapterSectionNameBlur}
               disabled={isLoading}
               isExtracting={isExtracting}
               extractionError={extractionError}
@@ -125,7 +229,7 @@ const App = () => {
             <textarea
               value={userSummary}
               onChange={(e) => setUserSummary(e.target.value)}
-              placeholder="Paste your summary of the book..."
+              placeholder="Paste your summary of the book/section here..."
               rows={14}
               className="w-full resize-y rounded-lg border border-gray-300 bg-white px-4 py-3 text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             />

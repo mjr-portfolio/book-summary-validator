@@ -34,3 +34,14 @@ class ExtractTextResponse(BaseModel):
         if not value.strip():
             raise ValueError("extracted_text must not be empty")
         return value
+
+
+class LookupTextResponse(BaseModel):
+    extracted_text: str
+
+    @field_validator("extracted_text")
+    @classmethod
+    def must_not_be_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("extracted_text must not be empty")
+        return value

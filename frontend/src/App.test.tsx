@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
-import { compareTexts, extractTextFromImage } from './lib/api'
+import { compareTexts, extractTextFromImage, lookupBookText } from './lib/api'
 import { compressImage } from './lib/compressImage'
 
 vi.mock('./lib/compressImage', () => ({
@@ -14,10 +14,12 @@ vi.mock('./lib/api', () => ({
     critique: 'Strong match.',
   }),
   extractTextFromImage: vi.fn().mockResolvedValue('Extracted book text from image.'),
+  lookupBookText: vi.fn().mockResolvedValue('Chapter summary from book lookup.'),
 }))
 
 const mockedCompareTexts = vi.mocked(compareTexts)
 const mockedExtractTextFromImage = vi.mocked(extractTextFromImage)
+const mockedLookupBookText = vi.mocked(lookupBookText)
 const mockedCompressImage = vi.mocked(compressImage)
 
 describe('App', () => {
@@ -236,5 +238,114 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /compare/i })).toBeEnabled()
     })
+  })
+
+  it('switches to book lookup mode and shows lookup form', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+
+    expect(screen.getByLabelText(/book title/i)).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /^author$/i })).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: /^chapter or section name$/i })).toBeDisabled()
+  })
+
+  it('locks chapter or section name until title and author are filled', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+
+    const sectionInput = screen.getByRole('textbox', { name: /^chapter or section name$/i })
+    expect(sectionInput).toBeDisabled()
+
+    await user.type(screen.getByRole('textbox', { name: /^book title$/i }), 'Pride and Prejudice')
+    expect(sectionInput).toBeDisabled()
+
+    await user.type(screen.getByRole('textbox', { name: /^author$/i }), 'Jane Austen')
+    expect(sectionInput).toBeEnabled()
+  })
+
+  it('clears chapter section name when author is cleared', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+    await user.type(screen.getByRole('textbox', { name: /^book title$/i }), 'Pride and Prejudice')
+    await user.type(screen.getByRole('textbox', { name: /^author$/i }), 'Jane Austen')
+    await user.type(screen.getByRole('textbox', { name: /^chapter or section name$/i }), 'Chapter 3')
+
+    expect(screen.getByRole('textbox', { name: /^chapter or section name$/i })).toHaveValue('Chapter 3')
+
+    await user.clear(screen.getByRole('textbox', { name: /^author$/i }))
+
+    expect(screen.getByRole('textbox', { name: /^chapter or section name$/i })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: /^chapter or section name$/i })).toBeDisabled()
+  })
+
+  it('fetches chapter summary on blur and enables compare', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+    await user.type(screen.getByRole('textbox', { name: /^book title$/i }), 'Pride and Prejudice')
+    await user.type(screen.getByRole('textbox', { name: /^author$/i }), 'Jane Austen')
+    await user.type(screen.getByRole('textbox', { name: /^chapter or section name$/i }), 'Chapter 3')
+    await user.tab()
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+
+    await waitFor(() => {
+      expect(mockedLookupBookText).toHaveBeenCalledWith(
+        'Pride and Prejudice',
+        'Jane Austen',
+        'Chapter 3',
+      )
+      expect(screen.getByText(/chapter summary ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /compare/i })).toBeEnabled()
+  })
+
+  it('runs compare using lookup summary as source text', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+    await user.type(screen.getByRole('textbox', { name: /^book title$/i }), 'Pride and Prejudice')
+    await user.type(screen.getByRole('textbox', { name: /^author$/i }), 'Jane Austen')
+    await user.type(screen.getByRole('textbox', { name: /^chapter or section name$/i }), 'Chapter 3')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(screen.getByText(/chapter summary ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+
+    expect(mockedCompareTexts).toHaveBeenCalledWith(
+      'Chapter summary from book lookup.',
+      'My summary',
+    )
+  })
+
+  it('clears lookup extraction when switching tabs', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /book lookup/i }))
+    await user.type(screen.getByRole('textbox', { name: /^book title$/i }), 'Pride and Prejudice')
+    await user.type(screen.getByRole('textbox', { name: /^author$/i }), 'Jane Austen')
+    await user.type(screen.getByRole('textbox', { name: /^chapter or section name$/i }), 'Chapter 3')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(screen.getByText(/chapter summary ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: /paste text block/i }))
+
+    expect(screen.queryByText(/chapter summary ready — ready to compare/i)).not.toBeInTheDocument()
   })
 })

@@ -12,6 +12,8 @@ from app.services.gemini import (
     compare_texts,
     extract_text_from_image,
     extract_text_from_image_async,
+    fetch_book_knowledge_summary,
+    fetch_book_knowledge_summary_async,
 )
 
 
@@ -225,6 +227,64 @@ def test_compare_texts_async_delegates_to_sync() -> None:
 
     assert result == expected
     mock_compare.assert_called_once_with("Book content", "My summary")
+
+
+def test_fetch_book_knowledge_summary_returns_text() -> None:
+    mock_response = MagicMock()
+    mock_response.text = "Winston begins his rebellion against the Party."
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        result = fetch_book_knowledge_summary("1984", "George Orwell", "Chapter 1")
+
+    assert result == "Winston begins his rebellion against the Party."
+
+
+def test_fetch_book_knowledge_summary_raises_on_empty_response() -> None:
+    mock_response = MagicMock()
+    mock_response.text = "   "
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="Empty book knowledge summary"):
+            fetch_book_knowledge_summary("1984", "George Orwell", "Chapter 1")
+
+
+def test_fetch_book_knowledge_summary_raises_when_book_not_found() -> None:
+    from app.services.gemini import BookKnowledgeNotFoundError
+
+    mock_response = MagicMock()
+    mock_response.text = "The requested book or section cannot be identified."
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(BookKnowledgeNotFoundError, match="could not confidently locate"):
+            fetch_book_knowledge_summary("Fake Book", "Unknown Author", "Chapter 99")
+
+
+def test_fetch_book_knowledge_summary_raises_when_api_key_missing() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        with pytest.raises(GeminiServiceError, match="GEMINI_API_KEY is not configured"):
+            fetch_book_knowledge_summary("1984", "George Orwell", "Chapter 1")
+
+
+def test_fetch_book_knowledge_summary_async_delegates_to_sync() -> None:
+    with patch(
+        "app.services.gemini.fetch_book_knowledge_summary",
+        return_value="Async chapter summary.",
+    ) as mock_lookup:
+        result = asyncio.run(
+            fetch_book_knowledge_summary_async("1984", "George Orwell", "Chapter 1"),
+        )
+
+    assert result == "Async chapter summary."
+    mock_lookup.assert_called_once_with("1984", "George Orwell", "Chapter 1")
 
 
 def test_compare_texts_live_integration() -> None:

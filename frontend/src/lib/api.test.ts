@@ -1,4 +1,4 @@
-import { compareTexts, extractTextFromImage } from './api'
+import { compareTexts, extractTextFromImage, lookupBookText } from './api'
 
 describe('compareTexts', () => {
   it('returns parsed response on success', async () => {
@@ -146,6 +146,83 @@ describe('extractTextFromImage', () => {
 
     await expect(extractTextFromImage(blob)).rejects.toThrow(
       'Text extraction response was missing extracted text',
+    )
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('lookupBookText', () => {
+  it('sends form data and returns extracted text', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ extracted_text: 'Chapter summary text.' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await lookupBookText('Pride and Prejudice', 'Jane Austen', 'Chapter 3')
+
+    expect(result).toBe('Chapter summary text.')
+    expect(fetchMock).toHaveBeenCalledOnce()
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/lookup-text')
+    expect(options.method).toBe('POST')
+    expect(options.body).toBeInstanceOf(FormData)
+
+    const formData = options.body as FormData
+    expect(formData.get('book_title')).toBe('Pride and Prejudice')
+    expect(formData.get('author')).toBe('Jane Austen')
+    expect(formData.get('chapter_or_section_name')).toBe('Chapter 3')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('trims payload values before sending', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ extracted_text: 'Summary.' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await lookupBookText('  1984  ', '  George Orwell  ', '  Chapter 1  ')
+
+    const formData = (fetchMock.mock.calls[0] as [string, RequestInit])[1].body as FormData
+    expect(formData.get('book_title')).toBe('1984')
+    expect(formData.get('author')).toBe('George Orwell')
+    expect(formData.get('chapter_or_section_name')).toBe('Chapter 1')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when lookup fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        json: () => Promise.resolve({ detail: 'author must not be empty' }),
+      }),
+    )
+
+    await expect(lookupBookText('1984', '', 'Chapter 1')).rejects.toThrow(
+      'author must not be empty',
+    )
+
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when extracted text is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ extracted_text: '   ' }),
+      }),
+    )
+
+    await expect(lookupBookText('1984', 'George Orwell', 'Chapter 1')).rejects.toThrow(
+      'Book lookup response was missing extracted text',
     )
 
     vi.unstubAllGlobals()

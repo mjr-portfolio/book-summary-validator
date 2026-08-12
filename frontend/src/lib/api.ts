@@ -74,3 +74,33 @@ export const extractTextFromImage = async (imageBlob: Blob): Promise<string> => 
 
   return data.extracted_text.trim()
 }
+
+export const lookupBookText = async (
+  bookTitle: string,
+  author: string,
+  chapterOrSectionName: string,
+): Promise<string> => {
+  const formData = new FormData()
+  formData.append('book_title', bookTitle.trim())
+  formData.append('author', author.trim())
+  formData.append('chapter_or_section_name', chapterOrSectionName.trim())
+
+  const response = await fetch(`${API_BASE_URL}/api/lookup-text`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      await parseErrorResponse(response, `Book lookup failed with status ${response.status}`),
+    )
+  }
+
+  const data = (await response.json()) as { extracted_text?: string }
+
+  if (!data.extracted_text?.trim()) {
+    throw new Error('Book lookup response was missing extracted text')
+  }
+
+  return data.extracted_text.trim()
+}
