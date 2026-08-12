@@ -1,4 +1,9 @@
-from app.prompts import EXTRACT_TEXT_PROMPT, build_book_lookup_prompt, build_compare_prompt
+from app.prompts import (
+    EXTRACT_TEXT_PROMPT,
+    build_book_lookup_prompt,
+    build_compare_prompt,
+    build_section_filter_prompt,
+)
 
 
 def test_build_compare_prompt_includes_source_and_summary() -> None:
@@ -33,3 +38,15 @@ def test_build_book_lookup_prompt_ignores_page_numbers() -> None:
     assert "IGNORE all physical page numbers" in prompt
     assert "page-based lookup is unsupported" in prompt
     assert "structural divider" in prompt
+
+
+def test_build_section_filter_prompt_includes_section_and_scraped_text() -> None:
+    prompt = build_section_filter_prompt(
+        "Full scraped page with Introduction and Conclusion.",
+        "Introduction",
+    )
+
+    assert "Introduction" in prompt
+    assert "Full scraped page with Introduction and Conclusion." in prompt
+    assert "isolate and return ONLY the literal text" in prompt
+    assert "Do not include any other parts of the page" in prompt

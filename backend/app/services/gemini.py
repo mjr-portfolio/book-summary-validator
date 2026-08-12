@@ -7,8 +7,14 @@ from google.genai import errors as genai_errors
 from google.genai import types
 from PIL import Image, UnidentifiedImageError
 
-from app.prompts import EXTRACT_TEXT_PROMPT, build_book_lookup_prompt, build_compare_prompt
+from app.prompts import (
+    EXTRACT_TEXT_PROMPT,
+    build_book_lookup_prompt,
+    build_compare_prompt,
+    build_section_filter_prompt,
+)
 from app.schemas.compare import CompareResponse
+from app.services.scraper import UrlScrapeError, fetch_and_extract_article_text
 
 MODEL = "gemini-flash-latest"
 MAX_IMAGE_DIMENSION = 4096
@@ -191,3 +197,24 @@ async def fetch_book_knowledge_summary_async(
         author,
         chapter_or_section_name,
     )
+
+
+@_wrap_gemini_errors
+def filter_scraped_text_by_section(scraped_text: str, section_filter: str) -> str:
+    client = _get_client()
+    prompt = build_section_filter_prompt(scraped_text, section_filter)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+    )
+
+    filtered = (response.text or "").strip()
+    if not filtered:
+        raise GeminiServiceError("Empty section filter result from scraped webpage")
+
+    return filtered
+
+
+async def scrape_and_filter_article_async(url: str, section_filter: str) -> str:
+    scraped_text = await fetch_and_extract_article_text(url)
+    return await asyncio.to_thread(filter_scraped_text_by_section, scraped_text, section_filter)

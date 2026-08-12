@@ -1,7 +1,7 @@
 import asyncio
 import io
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from PIL import Image
@@ -14,6 +14,8 @@ from app.services.gemini import (
     extract_text_from_image_async,
     fetch_book_knowledge_summary,
     fetch_book_knowledge_summary_async,
+    filter_scraped_text_by_section,
+    scrape_and_filter_article_async,
 )
 
 
@@ -285,6 +287,57 @@ def test_fetch_book_knowledge_summary_async_delegates_to_sync() -> None:
 
     assert result == "Async chapter summary."
     mock_lookup.assert_called_once_with("1984", "George Orwell", "Chapter 1")
+
+
+def test_filter_scraped_text_by_section_returns_text() -> None:
+    mock_response = MagicMock()
+    mock_response.text = "Only the introduction paragraph."
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        result = filter_scraped_text_by_section(
+            "Introduction\nOnly the introduction paragraph.\nConclusion\nOther text.",
+            "Introduction",
+        )
+
+    assert result == "Only the introduction paragraph."
+
+
+def test_filter_scraped_text_by_section_raises_on_empty_response() -> None:
+    mock_response = MagicMock()
+    mock_response.text = "   "
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="Empty section filter result"):
+            filter_scraped_text_by_section("scraped page text", "Introduction")
+
+
+def test_scrape_and_filter_article_async_runs_two_step_pipeline() -> None:
+    with (
+        patch(
+            "app.services.gemini.fetch_and_extract_article_text",
+            new=AsyncMock(return_value="Raw scraped webpage text."),
+        ) as mock_fetch,
+        patch(
+            "app.services.gemini.filter_scraped_text_by_section",
+            return_value="Filtered section text.",
+        ) as mock_filter,
+    ):
+        result = asyncio.run(
+            scrape_and_filter_article_async(
+                "https://example.com/article",
+                "Introduction",
+            ),
+        )
+
+    assert result == "Filtered section text."
+    mock_fetch.assert_awaited_once_with("https://example.com/article")
+    mock_filter.assert_called_once_with("Raw scraped webpage text.", "Introduction")
 
 
 def test_compare_texts_live_integration() -> None:

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event'
 import ModeToggle from './ModeToggle'
 
 describe('ModeToggle', () => {
-  it('renders all three input mode tabs', () => {
+  it('renders all four input mode tabs', () => {
     render(<ModeToggle mode="text" onChange={vi.fn()} />)
 
     expect(screen.getByRole('tab', { name: /paste text block/i })).toHaveAttribute(
@@ -15,6 +15,10 @@ describe('ModeToggle', () => {
       'false',
     )
     expect(screen.getByRole('tab', { name: /book lookup/i })).toHaveAttribute(
+      'aria-selected',
+      'false',
+    )
+    expect(screen.getByRole('tab', { name: /article url/i })).toHaveAttribute(
       'aria-selected',
       'false',
     )
@@ -55,6 +59,26 @@ describe('ModeToggle', () => {
     render(<ModeToggle mode="lookup" onChange={vi.fn()} />)
 
     expect(screen.getByRole('tab', { name: /book lookup/i })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+  })
+
+  it('calls onChange with url when article url tab is clicked', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+
+    render(<ModeToggle mode="text" onChange={onChange} />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+
+    expect(onChange).toHaveBeenCalledWith('url')
+  })
+
+  it('reflects the active url mode', () => {
+    render(<ModeToggle mode="url" onChange={vi.fn()} />)
+
+    expect(screen.getByRole('tab', { name: /article url/i })).toHaveAttribute(
       'aria-selected',
       'true',
     )

@@ -1,7 +1,13 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.compare import CompareRequest, CompareResponse, ExtractTextResponse, LookupTextResponse
+from app.schemas.compare import (
+    CompareRequest,
+    CompareResponse,
+    ExtractTextResponse,
+    LookupTextResponse,
+    ScrapeUrlResponse,
+)
 
 
 def test_compare_request_valid() -> None:
@@ -54,3 +60,13 @@ def test_lookup_text_response_valid() -> None:
 def test_lookup_text_response_rejects_empty_text() -> None:
     with pytest.raises(ValidationError):
         LookupTextResponse(extracted_text="   ")
+
+
+def test_scrape_url_response_valid() -> None:
+    response = ScrapeUrlResponse(extracted_text="Scraped article paragraph.")
+    assert response.extracted_text == "Scraped article paragraph."
+
+
+def test_scrape_url_response_rejects_empty_text() -> None:
+    with pytest.raises(ValidationError):
+        ScrapeUrlResponse(extracted_text="   ")

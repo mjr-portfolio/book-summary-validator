@@ -2,11 +2,12 @@ import { useRef, useState } from 'react'
 import BookLookupForm from './components/ui/BookLookupForm'
 import ImageUpload from './components/ui/ImageUpload'
 import ModeToggle from './components/ui/ModeToggle'
-import { compareTexts, extractTextFromImage, lookupBookText } from './lib/api'
+import UrlArticleForm from './components/ui/UrlArticleForm'
+import { compareTexts, extractTextFromImage, lookupBookText, scrapeUrl } from './lib/api'
 import { compressImage } from './lib/compressImage'
 import type { CompareResponse } from './types/compare'
 
-type InputMode = 'text' | 'image' | 'lookup'
+type InputMode = 'text' | 'image' | 'lookup' | 'url'
 
 const App = () => {
   const [inputMode, setInputMode] = useState<InputMode>('text')
@@ -15,6 +16,8 @@ const App = () => {
   const [bookTitle, setBookTitle] = useState('')
   const [author, setAuthor] = useState('')
   const [chapterSectionName, setChapterSectionName] = useState('')
+  const [articleUrl, setArticleUrl] = useState('')
+  const [articleSectionFilter, setArticleSectionFilter] = useState('')
   const [extractedBookText, setExtractedBookText] = useState('')
   const [isExtracting, setIsExtracting] = useState(false)
   const [extractionError, setExtractionError] = useState<string | null>(null)
@@ -26,6 +29,8 @@ const App = () => {
 
   const canEnterChapterSection =
     bookTitle.trim().length > 0 && author.trim().length > 0
+
+  const canEnterArticleSectionFilter = articleUrl.trim().length > 0
 
   const canCompare =
     userSummary.trim().length > 0 &&
@@ -154,6 +159,64 @@ const App = () => {
     }
   }
 
+  const handleArticleUrlChange = (value: string) => {
+    setArticleUrl(value)
+    resetExtractionState()
+
+    if (!value.trim()) {
+      setArticleSectionFilter('')
+    }
+  }
+
+  const handleArticleSectionFilterChange = (value: string) => {
+    if (!canEnterArticleSectionFilter) {
+      return
+    }
+
+    setArticleSectionFilter(value)
+    resetExtractionState()
+  }
+
+  const handleArticleSectionFilterBlur = async () => {
+    const url = articleUrl.trim()
+    const sectionFilter = articleSectionFilter.trim()
+
+    if (!url || !sectionFilter || !canEnterArticleSectionFilter) {
+      return
+    }
+
+    const requestId = ++extractionRequestId.current
+    setIsExtracting(true)
+    setExtractionError(null)
+    setExtractedBookText('')
+    setResult(null)
+    setError(null)
+
+    try {
+      const scrapedText = await scrapeUrl(url, sectionFilter)
+
+      if (requestId !== extractionRequestId.current) {
+        return
+      }
+
+      setExtractedBookText(scrapedText)
+    } catch (err) {
+      if (requestId !== extractionRequestId.current) {
+        return
+      }
+
+      setExtractionError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to scrape article section. Please try again.',
+      )
+    } finally {
+      if (requestId === extractionRequestId.current) {
+        setIsExtracting(false)
+      }
+    }
+  }
+
   const handleCompare = async () => {
     if (!canCompare || isLoading) return
 
@@ -180,8 +243,8 @@ const App = () => {
             Book Summary Validator
           </h1>
           <p className="mt-2 text-gray-600">
-            Paste text, scan a photo, or look up a chapter or section, then compare it with your
-            personal summary.
+            Paste text, scan a photo, look up a chapter, or scrape an article link, then compare it
+            with your personal summary.
           </p>
         </header>
 
@@ -208,7 +271,7 @@ const App = () => {
               extractionError={extractionError}
               isExtracted={Boolean(extractedBookText) && !isExtracting}
             />
-          ) : (
+          ) : inputMode === 'lookup' ? (
             <BookLookupForm
               bookTitle={bookTitle}
               author={author}
@@ -217,6 +280,18 @@ const App = () => {
               onAuthorChange={handleAuthorChange}
               onChapterSectionNameChange={handleChapterSectionNameChange}
               onChapterSectionNameBlur={handleChapterSectionNameBlur}
+              disabled={isLoading}
+              isExtracting={isExtracting}
+              extractionError={extractionError}
+              isExtracted={Boolean(extractedBookText) && !isExtracting}
+            />
+          ) : (
+            <UrlArticleForm
+              url={articleUrl}
+              sectionFilter={articleSectionFilter}
+              onUrlChange={handleArticleUrlChange}
+              onSectionFilterChange={handleArticleSectionFilterChange}
+              onSectionFilterBlur={handleArticleSectionFilterBlur}
               disabled={isLoading}
               isExtracting={isExtracting}
               extractionError={extractionError}

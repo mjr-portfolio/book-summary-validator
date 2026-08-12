@@ -259,3 +259,88 @@ def test_lookup_text_endpoint_returns_404_when_book_not_found(client) -> None:
 
     assert response.status_code == 404
     assert response.json()["detail"] == LOOKUP_NOT_FOUND_DETAIL
+
+
+def test_scrape_url_endpoint_returns_result(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.routes.compare.scrape_and_filter_article_async",
+        new_callable=AsyncMock,
+        return_value="Filtered article section content.",
+    ) as mock_scrape:
+        response = client.post(
+            "/api/scrape-url",
+            data={
+                "url": "https://example.com/article",
+                "section_filter": "Introduction",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["extracted_text"] == "Filtered article section content."
+    mock_scrape.assert_called_once_with("https://example.com/article", "Introduction")
+
+
+def test_scrape_url_endpoint_rejects_empty_url(client) -> None:
+    response = client.post(
+        "/api/scrape-url",
+        data={"url": "   ", "section_filter": "Introduction"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "url must not be empty"
+
+
+def test_scrape_url_endpoint_rejects_empty_section_filter(client) -> None:
+    response = client.post(
+        "/api/scrape-url",
+        data={"url": "https://example.com/article", "section_filter": "   "},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "section_filter must not be empty"
+
+
+def test_scrape_url_endpoint_returns_400_on_scrape_error(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.scraper import UrlScrapeError
+
+    with patch(
+        "app.routes.compare.scrape_and_filter_article_async",
+        new_callable=AsyncMock,
+        side_effect=UrlScrapeError("Could not reach URL or page is unreachable"),
+    ):
+        response = client.post(
+            "/api/scrape-url",
+            data={
+                "url": "https://example.com/missing",
+                "section_filter": "Introduction",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Could not reach URL or page is unreachable"
+
+
+def test_scrape_url_endpoint_returns_400_on_empty_section_filter_result(client) -> None:
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.gemini import GeminiServiceError
+
+    with patch(
+        "app.routes.compare.scrape_and_filter_article_async",
+        new_callable=AsyncMock,
+        side_effect=GeminiServiceError("Empty section filter result from scraped webpage"),
+    ):
+        response = client.post(
+            "/api/scrape-url",
+            data={
+                "url": "https://example.com/article",
+                "section_filter": "Missing Section",
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Empty section filter result from scraped webpage"

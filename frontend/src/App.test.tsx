@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
-import { compareTexts, extractTextFromImage, lookupBookText } from './lib/api'
+import { compareTexts, extractTextFromImage, lookupBookText, scrapeUrl } from './lib/api'
 import { compressImage } from './lib/compressImage'
 
 vi.mock('./lib/compressImage', () => ({
@@ -15,11 +15,13 @@ vi.mock('./lib/api', () => ({
   }),
   extractTextFromImage: vi.fn().mockResolvedValue('Extracted book text from image.'),
   lookupBookText: vi.fn().mockResolvedValue('Chapter summary from book lookup.'),
+  scrapeUrl: vi.fn().mockResolvedValue('Scraped article text from URL.'),
 }))
 
 const mockedCompareTexts = vi.mocked(compareTexts)
 const mockedExtractTextFromImage = vi.mocked(extractTextFromImage)
 const mockedLookupBookText = vi.mocked(lookupBookText)
+const mockedScrapeUrl = vi.mocked(scrapeUrl)
 const mockedCompressImage = vi.mocked(compressImage)
 
 describe('App', () => {
@@ -347,5 +349,159 @@ describe('App', () => {
     await user.click(screen.getByRole('tab', { name: /paste text block/i }))
 
     expect(screen.queryByText(/chapter summary ready — ready to compare/i)).not.toBeInTheDocument()
+  })
+
+  it('switches to article url mode and shows url form', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+
+    expect(screen.getByLabelText(/article or web link url/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/target chapter or section name/i)).toBeDisabled()
+    expect(screen.queryByLabelText(/book source text/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/book title/i)).not.toBeInTheDocument()
+  })
+
+  it('locks target section until url is filled', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+
+    const sectionInput = screen.getByLabelText(/target chapter or section name/i)
+    expect(sectionInput).toBeDisabled()
+
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    expect(sectionInput).toBeEnabled()
+  })
+
+  it('does not scrape when leaving the url field', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    await user.tab()
+
+    expect(mockedScrapeUrl).not.toHaveBeenCalled()
+  })
+
+  it('scrapes article section on section blur and enables compare', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    await user.type(screen.getByLabelText(/target chapter or section name/i), 'Introduction')
+    await user.tab()
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+
+    await waitFor(() => {
+      expect(mockedScrapeUrl).toHaveBeenCalledWith(
+        'https://example.com/article',
+        'Introduction',
+      )
+      expect(screen.getByText(/article section ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /compare/i })).toBeEnabled()
+  })
+
+  it('runs compare using scraped article section as source', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    await user.type(screen.getByLabelText(/target chapter or section name/i), 'Introduction')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(screen.getByText(/article section ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+
+    expect(mockedCompareTexts).toHaveBeenCalledWith(
+      'Scraped article text from URL.',
+      'My summary',
+    )
+  })
+
+  it('shows scrape errors from the API', async () => {
+    mockedScrapeUrl.mockRejectedValueOnce(new Error('Could not reach URL or page is unreachable'))
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/missing',
+    )
+    await user.type(screen.getByLabelText(/target chapter or section name/i), 'Introduction')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/could not reach url or page is unreachable/i),
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /compare/i })).toBeDisabled()
+  })
+
+  it('clears url extraction when switching tabs', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    await user.type(screen.getByLabelText(/target chapter or section name/i), 'Introduction')
+    await user.tab()
+
+    await waitFor(() => {
+      expect(screen.getByText(/article section ready — ready to compare/i)).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('tab', { name: /paste text block/i }))
+
+    expect(screen.queryByText(/article section ready — ready to compare/i)).not.toBeInTheDocument()
+  })
+
+  it('clears target section when url is cleared', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: /article url/i }))
+    await user.type(
+      screen.getByLabelText(/article or web link url/i),
+      'https://example.com/article',
+    )
+    await user.type(screen.getByLabelText(/target chapter or section name/i), 'Introduction')
+
+    expect(screen.getByLabelText(/target chapter or section name/i)).toHaveValue('Introduction')
+
+    await user.clear(screen.getByLabelText(/article or web link url/i))
+
+    expect(screen.getByLabelText(/target chapter or section name/i)).toHaveValue('')
+    expect(screen.getByLabelText(/target chapter or section name/i)).toBeDisabled()
   })
 })

@@ -2,14 +2,21 @@ from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from app.schemas.compare import CompareResponse, ExtractTextResponse, LookupTextResponse
+from app.schemas.compare import (
+    CompareResponse,
+    ExtractTextResponse,
+    LookupTextResponse,
+    ScrapeUrlResponse,
+)
 from app.services.gemini import (
     BookKnowledgeNotFoundError,
     GeminiServiceError,
     compare_texts_async,
     extract_text_from_image_async,
     fetch_book_knowledge_summary_async,
+    scrape_and_filter_article_async,
 )
+from app.services.scraper import UrlScrapeError
 
 LOOKUP_NOT_FOUND_DETAIL = (
     "The AI could not confidently locate that book or chapter. "
@@ -48,6 +55,7 @@ def _raise_gemini_http_error(exc: GeminiServiceError) -> None:
         or "unsupported image" in message
         or "empty text extraction" in message
         or "empty book knowledge summary" in message
+        or "empty section filter" in message
     ):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -123,5 +131,27 @@ async def lookup_text(
         return LookupTextResponse(extracted_text=summary)
     except BookKnowledgeNotFoundError as exc:
         raise HTTPException(status_code=404, detail=LOOKUP_NOT_FOUND_DETAIL) from exc
+    except GeminiServiceError as exc:
+        _raise_gemini_http_error(exc)
+
+
+@router.post("/scrape-url", response_model=ScrapeUrlResponse)
+async def scrape_url(
+    url: Annotated[str, Form()],
+    section_filter: Annotated[str, Form()],
+) -> ScrapeUrlResponse:
+    target = url.strip()
+    section = section_filter.strip()
+
+    if not target:
+        raise HTTPException(status_code=422, detail="url must not be empty")
+    if not section:
+        raise HTTPException(status_code=422, detail="section_filter must not be empty")
+
+    try:
+        extracted = await scrape_and_filter_article_async(target, section)
+        return ScrapeUrlResponse(extracted_text=extracted)
+    except UrlScrapeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except GeminiServiceError as exc:
         _raise_gemini_http_error(exc)
