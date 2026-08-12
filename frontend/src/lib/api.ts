@@ -104,3 +104,28 @@ export const lookupBookText = async (
 
   return data.extracted_text.trim()
 }
+
+export const scrapeUrl = async (url: string, sectionFilter: string): Promise<string> => {
+  const formData = new FormData()
+  formData.append('url', url.trim())
+  formData.append('section_filter', sectionFilter.trim())
+
+  const response = await fetch(`${API_BASE_URL}/api/scrape-url`, {
+    method: 'POST',
+    body: formData,
+  })
+
+  if (!response.ok) {
+    throw new Error(
+      await parseErrorResponse(response, `URL scrape failed with status ${response.status}`),
+    )
+  }
+
+  const data = (await response.json()) as { extracted_text?: string }
+
+  if (!data.extracted_text?.trim()) {
+    throw new Error('URL scrape response was missing extracted text')
+  }
+
+  return data.extracted_text.trim()
+}

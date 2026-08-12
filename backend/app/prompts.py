@@ -40,6 +40,12 @@ Instructions:
 - If the book or section cannot be identified, output exactly this sentence and nothing else: "The requested book or section cannot be identified."
 """
 
+SECTION_FILTER_PROMPT_TEMPLATE = """From the following scraped webpage text, isolate and return ONLY the literal text contained within the section or chapter titled '{section_filter}'. Do not include any other parts of the page, layout headers, or conversational commentary.
+
+## Scraped Webpage Text
+{scraped_text}
+"""
+
 
 def build_compare_prompt(book_text: str, user_summary: str) -> str:
     return COMPARE_PROMPT_TEMPLATE.format(
@@ -53,4 +59,11 @@ def build_book_lookup_prompt(title: str, author: str, chapter_or_section_name: s
         title=title,
         author=author,
         chapter_or_section_name=chapter_or_section_name,
+    )
+
+
+def build_section_filter_prompt(scraped_text: str, section_filter: str) -> str:
+    return SECTION_FILTER_PROMPT_TEMPLATE.format(
+        scraped_text=scraped_text,
+        section_filter=section_filter,
     )
