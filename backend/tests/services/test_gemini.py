@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from PIL import Image
 
-from app.schemas.compare import CompareResponse
+from app.schemas.compare import (
+    CompareResponse,
+    GenerateQuestionsResponse,
+    GradeAnswerResult,
+    GradeAnswersResponse,
+    StudyQuestion,
+)
 from app.services.gemini import (
     GeminiServiceError,
     compare_texts,
@@ -15,6 +21,8 @@ from app.services.gemini import (
     fetch_book_knowledge_summary,
     fetch_book_knowledge_summary_async,
     filter_scraped_text_by_section,
+    generate_study_questions,
+    grade_study_answers,
     scrape_and_filter_article_async,
 )
 
@@ -338,6 +346,102 @@ def test_scrape_and_filter_article_async_runs_two_step_pipeline() -> None:
     assert result == "Filtered section text."
     mock_fetch.assert_awaited_once_with("https://example.com/article")
     mock_filter.assert_called_once_with("Raw scraped webpage text.", "Introduction")
+
+
+def test_generate_study_questions_returns_parsed_response() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = GenerateQuestionsResponse(
+        questions=[
+            StudyQuestion(question="Q1?"),
+            StudyQuestion(question="Q2?"),
+            StudyQuestion(question="Q3?"),
+        ]
+    )
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        result = generate_study_questions(
+            "Source",
+            "Critique",
+            "remedial",
+            "standard",
+            ["Old Q?"],
+        )
+
+    assert len(result.questions) == 3
+    assert result.questions[0].question == "Q1?"
+    mock_client.models.generate_content.assert_called_once()
+
+
+def test_generate_study_questions_falls_back_to_json() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = (
+        '{"questions":[{"question":"Q1?"},{"question":"Q2?"},{"question":"Q3?"}]}'
+    )
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        result = generate_study_questions("Source", "Critique", "mastery", "advanced")
+
+    assert result.questions[2].question == "Q3?"
+
+
+def test_generate_study_questions_raises_on_empty_response() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="Empty or unparseable response"):
+            generate_study_questions("Source", "Critique", "remedial", "standard")
+
+
+def test_grade_study_answers_returns_parsed_response() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = GradeAnswersResponse(
+        results=[
+            GradeAnswerResult(is_correct=True, feedback="Good", hint="Hint 1"),
+            GradeAnswerResult(is_correct=False, feedback="Miss", hint="Hint 2"),
+            GradeAnswerResult(is_correct=True, feedback="Solid", hint="Hint 3"),
+        ],
+        correct_count=2,
+    )
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        result = grade_study_answers(
+            "Source",
+            ["Q1?", "Q2?", "Q3?"],
+            ["A1", "A2", "A3"],
+        )
+
+    assert result.correct_count == 2
+    assert result.results[1].is_correct is False
+
+
+def test_grade_study_answers_raises_on_empty_response() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = None
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="Empty or unparseable response"):
+            grade_study_answers("Source", ["Q1?", "Q2?", "Q3?"], ["A1", "A2", "A3"])
 
 
 def test_compare_texts_live_integration() -> None:

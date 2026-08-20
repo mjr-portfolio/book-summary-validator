@@ -1,8 +1,13 @@
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 import pytest
 
 from app.services.scraper import (
+    JINA_READER_PREFIX,
     UrlScrapeError,
-    extract_article_text,
+    fetch_and_extract_article_text,
     normalize_and_validate_url,
 )
 
@@ -31,50 +36,60 @@ def test_normalize_and_validate_url_rejects_private_ip() -> None:
         normalize_and_validate_url("http://192.168.1.10/internal")
 
 
-def test_extract_article_text_prefers_article_and_strips_noise() -> None:
-    html = """
-    <html>
-      <body>
-        <nav>Home About</nav>
-        <aside class="sidebar">Related ads</aside>
-        <script>window.track()</script>
-        <article>
-          <h1>Deep Dive Into Summaries</h1>
-          <p>This is the primary article content that should be kept for comparison.</p>
-          <p>Readers use summaries to check understanding of source material.</p>
-        </article>
-        <footer>Copyright</footer>
-      </body>
-    </html>
-    """
+def test_fetch_and_extract_article_text_uses_jina_proxy() -> None:
+    article_markdown = (
+        "Title: Deep Dive Into Summaries\n\n"
+        "This is the primary article content that should be kept for comparison.\n"
+        "Readers use summaries to check understanding of source material."
+    )
 
-    text = extract_article_text(html)
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.content = article_markdown.encode("utf-8")
+    mock_response.text = article_markdown
+
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.scraper.httpx.AsyncClient", return_value=mock_client):
+        text = asyncio.run(fetch_and_extract_article_text("https://example.com/post"))
 
     assert "Deep Dive Into Summaries" in text
     assert "primary article content" in text
-    assert "Home About" not in text
-    assert "Related ads" not in text
-    assert "window.track" not in text
-    assert "Copyright" not in text
+    mock_client.get.assert_awaited_once_with(
+        f"{JINA_READER_PREFIX}https://example.com/post",
+    )
 
 
-def test_extract_article_text_falls_back_to_main() -> None:
-    html = """
-    <html>
-      <body>
-        <main>
-          <p>Main region holds enough readable content for extraction to succeed cleanly.</p>
-        </main>
-      </body>
-    </html>
-    """
+def test_fetch_and_extract_article_text_raises_when_content_too_short() -> None:
+    mock_response = MagicMock()
+    mock_response.raise_for_status = MagicMock()
+    mock_response.content = b"Hi"
+    mock_response.text = "Hi"
 
-    text = extract_article_text(html)
-    assert "Main region holds enough readable content" in text
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.scraper.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(UrlScrapeError, match="usable article text"):
+            asyncio.run(fetch_and_extract_article_text("https://example.com/post"))
 
 
-def test_extract_article_text_raises_when_content_too_short() -> None:
-    html = "<html><body><article><p>Hi</p></article></body></html>"
+def test_fetch_and_extract_article_text_maps_http_errors() -> None:
+    request = httpx.Request("GET", f"{JINA_READER_PREFIX}https://example.com/missing")
+    response = httpx.Response(404, request=request)
 
-    with pytest.raises(UrlScrapeError, match="usable article text"):
-        extract_article_text(html)
+    mock_client = AsyncMock()
+    mock_client.get = AsyncMock(
+        side_effect=httpx.HTTPStatusError("not found", request=request, response=response),
+    )
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.services.scraper.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(UrlScrapeError, match="Could not reach URL \\(HTTP 404\\)"):
+            asyncio.run(fetch_and_extract_article_text("https://example.com/missing"))

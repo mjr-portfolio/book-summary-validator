@@ -2,7 +2,9 @@ from app.prompts import (
     EXTRACT_TEXT_PROMPT,
     build_book_lookup_prompt,
     build_compare_prompt,
+    build_grade_answers_prompt,
     build_section_filter_prompt,
+    build_study_questions_prompt,
 )
 
 
@@ -50,3 +52,60 @@ def test_build_section_filter_prompt_includes_section_and_scraped_text() -> None
     assert "Full scraped page with Introduction and Conclusion." in prompt
     assert "isolate and return ONLY the literal text" in prompt
     assert "Do not include any other parts of the page" in prompt
+
+
+def test_build_study_questions_prompt_remedial_focuses_on_critique_gaps() -> None:
+    prompt = build_study_questions_prompt(
+        "Source chapter text.",
+        "Missed the climax and character motivation.",
+        "remedial",
+        "professional",
+        ["Old question about setting?"],
+    )
+
+    assert "REMEDIAL MODE" in prompt
+    assert "Ignore the difficulty parameter" in prompt
+    assert "Missed the climax and character motivation." in prompt
+    assert "Source chapter text." in prompt
+    assert "Old question about setting?" in prompt
+    assert "Never repeat or closely rephrase" in prompt
+
+
+def test_build_study_questions_prompt_mastery_scales_difficulty() -> None:
+    standard = build_study_questions_prompt(
+        "Source",
+        "Strong summary.",
+        "mastery",
+        "standard",
+    )
+    advanced = build_study_questions_prompt(
+        "Source",
+        "Strong summary.",
+        "mastery",
+        "advanced",
+    )
+    professional = build_study_questions_prompt(
+        "Source",
+        "Strong summary.",
+        "mastery",
+        "professional",
+    )
+
+    assert "general facts" in standard
+    assert "deep critical thinking" in advanced
+    assert "executive synthesis" in professional
+    assert "(none)" in standard
+
+
+def test_build_grade_answers_prompt_includes_qa_pairs() -> None:
+    prompt = build_grade_answers_prompt(
+        "Source text.",
+        ["What happened?", "Why?", "How?"],
+        ["Event A", "Reason B", "Method C"],
+    )
+
+    assert "Source text." in prompt
+    assert "Q1: What happened?" in prompt
+    assert "A1: Event A" in prompt
+    assert "is_correct" in prompt
+    assert "hint" in prompt

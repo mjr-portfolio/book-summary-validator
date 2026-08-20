@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import App from './App'
-import { compareTexts, extractTextFromImage, lookupBookText, scrapeUrl } from './lib/api'
+import { compareTexts, extractTextFromImage, generateQuestions, gradeAnswers, lookupBookText, scrapeUrl } from './lib/api'
 import { compressImage } from './lib/compressImage'
 
 vi.mock('./lib/compressImage', () => ({
@@ -16,12 +16,29 @@ vi.mock('./lib/api', () => ({
   extractTextFromImage: vi.fn().mockResolvedValue('Extracted book text from image.'),
   lookupBookText: vi.fn().mockResolvedValue('Chapter summary from book lookup.'),
   scrapeUrl: vi.fn().mockResolvedValue('Scraped article text from URL.'),
+  generateQuestions: vi.fn().mockResolvedValue({
+    questions: [
+      { question: 'What is the main theme?' },
+      { question: 'Who is the protagonist?' },
+      { question: 'What drives the conflict?' },
+    ],
+  }),
+  gradeAnswers: vi.fn().mockResolvedValue({
+    correct_count: 2,
+    results: [
+      { is_correct: true, feedback: 'Accurate.', hint: 'Keep reviewing themes.' },
+      { is_correct: false, feedback: 'Incomplete.', hint: 'Revisit character roles.' },
+      { is_correct: true, feedback: 'Solid.', hint: 'Consider secondary conflicts too.' },
+    ],
+  }),
 }))
 
 const mockedCompareTexts = vi.mocked(compareTexts)
 const mockedExtractTextFromImage = vi.mocked(extractTextFromImage)
 const mockedLookupBookText = vi.mocked(lookupBookText)
 const mockedScrapeUrl = vi.mocked(scrapeUrl)
+const mockedGenerateQuestions = vi.mocked(generateQuestions)
+const mockedGradeAnswers = vi.mocked(gradeAnswers)
 const mockedCompressImage = vi.mocked(compressImage)
 
 describe('App', () => {
@@ -503,5 +520,263 @@ describe('App', () => {
 
     expect(screen.getByLabelText(/target chapter or section name/i)).toHaveValue('')
     expect(screen.getByLabelText(/target chapter or section name/i)).toBeDisabled()
+  })
+
+  it('does not add a quiz navigation tab', () => {
+    render(<App />)
+
+    expect(screen.queryByRole('tab', { name: /quiz/i })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('tab')).toHaveLength(4)
+  })
+
+  it('shows mastery quiz card when match is at least 70', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /mastery mode: challenge your understanding/i }),
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /launch challenge quiz/i })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: /quiz difficulty/i })).toBeInTheDocument()
+  })
+
+  it('shows remedial quiz card when match is under 70', async () => {
+    mockedCompareTexts.mockResolvedValueOnce({
+      match_percentage: 55,
+      critique: 'Missed key themes.',
+    })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /review mode: let's fix your weak points/i }),
+      ).toBeInTheDocument()
+    })
+
+    expect(screen.getByRole('button', { name: /generate 3 study questions/i })).toBeInTheDocument()
+    expect(screen.queryByRole('group', { name: /quiz difficulty/i })).not.toBeInTheDocument()
+  })
+
+  it('generates and renders study questions', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /launch challenge quiz/i })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /launch challenge quiz/i }))
+
+    await waitFor(() => {
+      expect(mockedGenerateQuestions).toHaveBeenCalledWith({
+        source_text: 'Book excerpt',
+        critique: 'Strong match.',
+        quiz_type: 'mastery',
+        difficulty: 'standard',
+        exclusion_history: [],
+      })
+      expect(screen.getByText(/what is the main theme/i)).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { name: /launch challenge quiz/i })).not.toBeInTheDocument()
+  })
+
+  it('validates empty answers before grading', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /launch challenge quiz/i })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: /launch challenge quiz/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /submit answers/i })).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /submit answers/i }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      /please answer all three questions before submitting/i,
+    )
+    expect(mockedGradeAnswers).not.toHaveBeenCalled()
+  })
+
+  it('submits answers and shows grade results', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /launch challenge quiz/i })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: /launch challenge quiz/i }))
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/answer for question 1/i)).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByLabelText(/answer for question 1/i), 'Theme answer')
+    await user.type(screen.getByLabelText(/answer for question 2/i), 'Hero answer')
+    await user.type(screen.getByLabelText(/answer for question 3/i), 'Conflict answer')
+    await user.click(screen.getByRole('button', { name: /submit answers/i }))
+
+    await waitFor(() => {
+      expect(mockedGradeAnswers).toHaveBeenCalledWith({
+        source_text: 'Book excerpt',
+        questions: [
+          'What is the main theme?',
+          'Who is the protagonist?',
+          'What drives the conflict?',
+        ],
+        answers: ['Theme answer', 'Hero answer', 'Conflict answer'],
+      })
+      expect(screen.getByText(/score: 2 \/ 3 correct/i)).toBeInTheDocument()
+      expect(screen.getByText(/revisit character roles/i)).toBeInTheDocument()
+    })
+  })
+
+  it('regenerates questions with exclusion history and truncates past 10', async () => {
+    mockedGenerateQuestions
+      .mockResolvedValueOnce({
+        questions: [
+          { question: 'First Q1?' },
+          { question: 'First Q2?' },
+          { question: 'First Q3?' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        questions: [
+          { question: 'Second Q1?' },
+          { question: 'Second Q2?' },
+          { question: 'Second Q3?' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        questions: [
+          { question: 'Third Q1?' },
+          { question: 'Third Q2?' },
+          { question: 'Third Q3?' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        questions: [
+          { question: 'Fourth Q1?' },
+          { question: 'Fourth Q2?' },
+          { question: 'Fourth Q3?' },
+        ],
+      })
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(screen.getByLabelText(/book source text/i), 'Book excerpt')
+    await user.type(screen.getByLabelText(/user summary/i), 'My summary')
+    await user.click(screen.getByRole('button', { name: /compare/i }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /launch challenge quiz/i })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole('button', { name: /launch challenge quiz/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/first q1/i)).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: /regenerate fresh questions/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/second q1/i)).toBeInTheDocument()
+    })
+    expect(mockedGenerateQuestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        exclusion_history: ['First Q1?', 'First Q2?', 'First Q3?'],
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: /regenerate fresh questions/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/third q1/i)).toBeInTheDocument()
+    })
+    expect(mockedGenerateQuestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        exclusion_history: [
+          'First Q1?',
+          'First Q2?',
+          'First Q3?',
+          'Second Q1?',
+          'Second Q2?',
+          'Second Q3?',
+        ],
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: /regenerate fresh questions/i }))
+    await waitFor(() => {
+      expect(screen.getByText(/fourth q1/i)).toBeInTheDocument()
+    })
+    expect(mockedGenerateQuestions).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        exclusion_history: [
+          'First Q1?',
+          'First Q2?',
+          'First Q3?',
+          'Second Q1?',
+          'Second Q2?',
+          'Second Q3?',
+          'Third Q1?',
+          'Third Q2?',
+          'Third Q3?',
+        ],
+      }),
+    )
+
+    // Seed history beyond 10 by regenerating enough times is heavy; assert truncation helper path
+    // by mocking a long prior history through successive regenerations until length exceeds 10.
+    mockedGenerateQuestions.mockResolvedValue({
+      questions: [
+        { question: 'Extra Q1?' },
+        { question: 'Extra Q2?' },
+        { question: 'Extra Q3?' },
+      ],
+    })
+
+    // Current history has 9 items; one more regenerate appends 3 -> 12, then truncates to last 10.
+    await user.click(screen.getByRole('button', { name: /regenerate fresh questions/i }))
+    await waitFor(() => {
+      expect(mockedGenerateQuestions.mock.calls.at(-1)?.[0].exclusion_history).toHaveLength(10)
+    })
+    expect(mockedGenerateQuestions.mock.calls.at(-1)?.[0].exclusion_history).toEqual([
+      'First Q3?',
+      'Second Q1?',
+      'Second Q2?',
+      'Second Q3?',
+      'Third Q1?',
+      'Third Q2?',
+      'Third Q3?',
+      'Fourth Q1?',
+      'Fourth Q2?',
+      'Fourth Q3?',
+    ])
   })
 })

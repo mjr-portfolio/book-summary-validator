@@ -1,4 +1,10 @@
-import type { CompareResponse } from '../types/compare'
+import type {
+  CompareResponse,
+  GenerateQuestionsRequest,
+  GenerateQuestionsResponse,
+  GradeAnswersRequest,
+  GradeAnswersResponse,
+} from '../types/compare'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -30,6 +36,62 @@ const parseCompareResponse = async (response: Response): Promise<CompareResponse
     !data.critique.trim()
   ) {
     throw new Error('Compare response was missing required result fields')
+  }
+
+  return data
+}
+
+const parseGenerateQuestionsResponse = async (
+  response: Response,
+): Promise<GenerateQuestionsResponse> => {
+  if (!response.ok) {
+    throw new Error(
+      await parseErrorResponse(
+        response,
+        `Generate questions request failed with status ${response.status}`,
+      ),
+    )
+  }
+
+  const data = (await response.json()) as GenerateQuestionsResponse
+
+  if (
+    !Array.isArray(data.questions) ||
+    data.questions.length !== 3 ||
+    data.questions.some((item) => typeof item?.question !== 'string' || !item.question.trim())
+  ) {
+    throw new Error('Generate questions response was missing required question fields')
+  }
+
+  return data
+}
+
+const parseGradeAnswersResponse = async (response: Response): Promise<GradeAnswersResponse> => {
+  if (!response.ok) {
+    throw new Error(
+      await parseErrorResponse(
+        response,
+        `Grade answers request failed with status ${response.status}`,
+      ),
+    )
+  }
+
+  const data = (await response.json()) as GradeAnswersResponse
+
+  if (
+    !Array.isArray(data.results) ||
+    data.results.length !== 3 ||
+    typeof data.correct_count !== 'number' ||
+    data.results.some(
+      (item) =>
+        typeof item?.is_correct !== 'boolean' ||
+        typeof item?.feedback !== 'string' ||
+        !item.feedback.trim() ||
+        typeof item?.hint !== 'string' ||
+        !item.hint.trim(),
+    )
+  ) {
+    throw new Error('Grade answers response was missing required result fields')
   }
 
   return data
@@ -128,4 +190,38 @@ export const scrapeUrl = async (url: string, sectionFilter: string): Promise<str
   }
 
   return data.extracted_text.trim()
+}
+
+export const generateQuestions = async (
+  payload: GenerateQuestionsRequest,
+): Promise<GenerateQuestionsResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/generate-questions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_text: payload.source_text.trim(),
+      critique: payload.critique.trim(),
+      quiz_type: payload.quiz_type,
+      difficulty: payload.difficulty,
+      exclusion_history: payload.exclusion_history ?? [],
+    }),
+  })
+
+  return parseGenerateQuestionsResponse(response)
+}
+
+export const gradeAnswers = async (
+  payload: GradeAnswersRequest,
+): Promise<GradeAnswersResponse> => {
+  const response = await fetch(`${API_BASE_URL}/api/grade-answers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_text: payload.source_text.trim(),
+      questions: payload.questions.map((question) => question.trim()),
+      answers: payload.answers.map((answer) => answer.trim()),
+    }),
+  })
+
+  return parseGradeAnswersResponse(response)
 }

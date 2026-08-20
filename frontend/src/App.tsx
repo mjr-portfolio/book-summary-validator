@@ -1,13 +1,29 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import AdaptiveQuizCard from './components/ui/AdaptiveQuizCard'
 import BookLookupForm from './components/ui/BookLookupForm'
 import ImageUpload from './components/ui/ImageUpload'
 import ModeToggle from './components/ui/ModeToggle'
+import StudyQuiz from './components/ui/StudyQuiz'
 import UrlArticleForm from './components/ui/UrlArticleForm'
-import { compareTexts, extractTextFromImage, lookupBookText, scrapeUrl } from './lib/api'
+import {
+  compareTexts,
+  extractTextFromImage,
+  generateQuestions,
+  gradeAnswers,
+  lookupBookText,
+  scrapeUrl,
+} from './lib/api'
 import { compressImage } from './lib/compressImage'
-import type { CompareResponse } from './types/compare'
+import type {
+  CompareResponse,
+  GradeAnswerResult,
+  QuizDifficulty,
+  StudyQuestion,
+} from './types/compare'
 
 type InputMode = 'text' | 'image' | 'lookup' | 'url'
+
+const emptyAnswers = (): string[] => ['', '', '']
 
 const App = () => {
   const [inputMode, setInputMode] = useState<InputMode>('text')
@@ -26,6 +42,19 @@ const App = () => {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const extractionRequestId = useRef(0)
+  const resultsRef = useRef<HTMLElement | null>(null)
+  const quizRef = useRef<HTMLDivElement | null>(null)
+
+  const [askedQuestionHistory, setAskedQuestionHistory] = useState<string[]>([])
+  const [quizQuestions, setQuizQuestions] = useState<StudyQuestion[] | null>(null)
+  const [quizAnswers, setQuizAnswers] = useState<string[]>(emptyAnswers)
+  const [quizDifficulty, setQuizDifficulty] = useState<QuizDifficulty>('standard')
+  const [gradeResults, setGradeResults] = useState<GradeAnswerResult[] | null>(null)
+  const [correctCount, setCorrectCount] = useState<number | null>(null)
+  const [isGeneratingQuiz, setIsGeneratingQuiz] = useState(false)
+  const [isGradingQuiz, setIsGradingQuiz] = useState(false)
+  const [quizError, setQuizError] = useState<string | null>(null)
+  const [quizValidationError, setQuizValidationError] = useState<string | null>(null)
 
   const canEnterChapterSection =
     bookTitle.trim().length > 0 && author.trim().length > 0
@@ -37,6 +66,32 @@ const App = () => {
     (inputMode === 'text'
       ? bookText.trim().length > 0
       : extractedBookText.trim().length > 0 && !isExtracting)
+
+  const currentSourceText = inputMode === 'text' ? bookText : extractedBookText
+  const quizType = result && result.match_percentage < 70 ? 'remedial' : 'mastery'
+
+  useEffect(() => {
+    if (!result) return
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [result])
+
+  useEffect(() => {
+    if (!quizQuestions) return
+    quizRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [quizQuestions])
+
+  const resetQuizState = () => {
+    setAskedQuestionHistory([])
+    setQuizQuestions(null)
+    setQuizAnswers(emptyAnswers())
+    setQuizDifficulty('standard')
+    setGradeResults(null)
+    setCorrectCount(null)
+    setIsGeneratingQuiz(false)
+    setIsGradingQuiz(false)
+    setQuizError(null)
+    setQuizValidationError(null)
+  }
 
   const resetExtractionState = () => {
     extractionRequestId.current += 1
@@ -56,6 +111,7 @@ const App = () => {
     setExtractionError(null)
     setResult(null)
     setError(null)
+    resetQuizState()
 
     if (!file) {
       setIsExtracting(false)
@@ -135,6 +191,7 @@ const App = () => {
     setExtractedBookText('')
     setResult(null)
     setError(null)
+    resetQuizState()
 
     try {
       const summary = await lookupBookText(title, authorName, sectionName)
@@ -191,6 +248,7 @@ const App = () => {
     setExtractedBookText('')
     setResult(null)
     setError(null)
+    resetQuizState()
 
     try {
       const scrapedText = await scrapeUrl(url, sectionFilter)
@@ -223,6 +281,7 @@ const App = () => {
     setIsLoading(true)
     setError(null)
     setResult(null)
+    resetQuizState()
 
     try {
       const sourceText = inputMode === 'text' ? bookText : extractedBookText
@@ -232,6 +291,86 @@ const App = () => {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const runGenerateQuestions = async (exclusionHistory: string[]) => {
+    if (!result) return
+
+    setIsGeneratingQuiz(true)
+    setQuizError(null)
+    setQuizValidationError(null)
+    setGradeResults(null)
+    setCorrectCount(null)
+
+    try {
+      const response = await generateQuestions({
+        source_text: currentSourceText,
+        critique: result.critique,
+        quiz_type: quizType,
+        difficulty: quizType === 'remedial' ? 'standard' : quizDifficulty,
+        exclusion_history: exclusionHistory,
+      })
+      setQuizQuestions(response.questions)
+      setQuizAnswers(emptyAnswers())
+    } catch (err) {
+      setQuizError(
+        err instanceof Error ? err.message : 'Failed to generate study questions. Please try again.',
+      )
+    } finally {
+      setIsGeneratingQuiz(false)
+    }
+  }
+
+  const handleGenerateQuiz = async () => {
+    if (isGeneratingQuiz || !result) return
+    await runGenerateQuestions(askedQuestionHistory)
+  }
+
+  const handleRegenerateQuiz = async () => {
+    if (isGeneratingQuiz || isGradingQuiz || !quizQuestions || !result) return
+
+    const nextHistory = [...askedQuestionHistory, ...quizQuestions.map((item) => item.question)]
+    const truncatedHistory = nextHistory.length > 10 ? nextHistory.slice(-10) : nextHistory
+    setAskedQuestionHistory(truncatedHistory)
+    await runGenerateQuestions(truncatedHistory)
+  }
+
+  const handleAnswerChange = (index: number, value: string) => {
+    setQuizAnswers((prev) => {
+      const next = [...prev]
+      next[index] = value
+      return next
+    })
+    setQuizValidationError(null)
+  }
+
+  const handleSubmitAnswers = async () => {
+    if (isGradingQuiz || isGeneratingQuiz || !quizQuestions) return
+
+    if (quizAnswers.some((answer) => !answer.trim())) {
+      setQuizValidationError('Please answer all three questions before submitting.')
+      return
+    }
+
+    setIsGradingQuiz(true)
+    setQuizError(null)
+    setQuizValidationError(null)
+
+    try {
+      const response = await gradeAnswers({
+        source_text: currentSourceText,
+        questions: quizQuestions.map((item) => item.question),
+        answers: quizAnswers,
+      })
+      setGradeResults(response.results)
+      setCorrectCount(response.correct_count)
+    } catch (err) {
+      setQuizError(
+        err instanceof Error ? err.message : 'Failed to grade answers. Please try again.',
+      )
+    } finally {
+      setIsGradingQuiz(false)
     }
   }
 
@@ -333,6 +472,7 @@ const App = () => {
 
         {result && (
           <section
+            ref={resultsRef}
             aria-live="polite"
             className="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
           >
@@ -343,6 +483,42 @@ const App = () => {
             <p className="mt-1 text-sm text-gray-500">Conceptual match</p>
             <p className="mt-4 text-gray-700">{result.critique}</p>
           </section>
+        )}
+
+        {result && !quizQuestions && (
+          <AdaptiveQuizCard
+            quizType={quizType}
+            difficulty={quizDifficulty}
+            onDifficultyChange={setQuizDifficulty}
+            onGenerate={handleGenerateQuiz}
+            isGenerating={isGeneratingQuiz}
+          />
+        )}
+
+        {quizError && (
+          <div
+            role="alert"
+            className="mt-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700"
+          >
+            {quizError}
+          </div>
+        )}
+
+        {quizQuestions && (
+          <div ref={quizRef}>
+            <StudyQuiz
+              questions={quizQuestions}
+              answers={quizAnswers}
+              onAnswerChange={handleAnswerChange}
+              onSubmit={handleSubmitAnswers}
+              onRegenerate={handleRegenerateQuiz}
+              isGenerating={isGeneratingQuiz}
+              isGrading={isGradingQuiz}
+              validationError={quizValidationError}
+              gradeResults={gradeResults}
+              correctCount={correctCount}
+            />
+          </div>
         )}
       </div>
     </main>

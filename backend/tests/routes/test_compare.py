@@ -344,3 +344,101 @@ def test_scrape_url_endpoint_returns_400_on_empty_section_filter_result(client) 
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Empty section filter result from scraped webpage"
+
+
+def test_generate_questions_endpoint_returns_result(client, mock_generate_study_questions) -> None:
+    response = client.post(
+        "/api/generate-questions",
+        json={
+            "source_text": "A hero journeys across the land.",
+            "critique": "Missed the journey motif.",
+            "quiz_type": "remedial",
+            "difficulty": "standard",
+            "exclusion_history": ["What is the setting?"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["questions"]) == 3
+    assert data["questions"][0]["question"] == "What is the main theme?"
+    mock_generate_study_questions.assert_called_once_with(
+        "A hero journeys across the land.",
+        "Missed the journey motif.",
+        "remedial",
+        "standard",
+        ["What is the setting?"],
+    )
+
+
+def test_generate_questions_endpoint_strips_and_filters_history(
+    client,
+    mock_generate_study_questions,
+) -> None:
+    response = client.post(
+        "/api/generate-questions",
+        json={
+            "source_text": "  Source text  ",
+            "critique": "  Critique text  ",
+            "quiz_type": "mastery",
+            "difficulty": "advanced",
+            "exclusion_history": ["  Keep me  ", "   ", ""],
+        },
+    )
+
+    assert response.status_code == 200
+    mock_generate_study_questions.assert_called_once_with(
+        "Source text",
+        "Critique text",
+        "mastery",
+        "advanced",
+        ["Keep me"],
+    )
+
+
+def test_generate_questions_endpoint_rejects_invalid_payload(client) -> None:
+    response = client.post(
+        "/api/generate-questions",
+        json={
+            "source_text": "",
+            "critique": "Critique",
+            "quiz_type": "remedial",
+            "difficulty": "standard",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_grade_answers_endpoint_returns_result(client, mock_grade_study_answers) -> None:
+    response = client.post(
+        "/api/grade-answers",
+        json={
+            "source_text": "Source text",
+            "questions": ["Q1?", "Q2?", "Q3?"],
+            "answers": ["A1", "A2", "A3"],
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["correct_count"] == 2
+    assert len(data["results"]) == 3
+    mock_grade_study_answers.assert_called_once_with(
+        "Source text",
+        ["Q1?", "Q2?", "Q3?"],
+        ["A1", "A2", "A3"],
+    )
+
+
+def test_grade_answers_endpoint_rejects_empty_answers(client) -> None:
+    response = client.post(
+        "/api/grade-answers",
+        json={
+            "source_text": "Source text",
+            "questions": ["Q1?", "Q2?", "Q3?"],
+            "answers": ["A1", "   ", "A3"],
+        },
+    )
+
+    assert response.status_code == 422

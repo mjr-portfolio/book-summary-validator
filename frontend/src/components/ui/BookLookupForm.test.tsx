@@ -20,7 +20,7 @@ describe('BookLookupForm', () => {
     expect(screen.getByRole('textbox', { name: /^author$/i })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: /^chapter or section name$/i })).toBeInTheDocument()
     expect(
-      screen.getByPlaceholderText(/e.g., chapter 3, or part 1 section 2/i),
+      screen.getByPlaceholderText(/e.g., chapter 3, part 1 section 2, chapters 1-5, or entire book/i),
     ).toBeInTheDocument()
   })
 
