@@ -1,4 +1,4 @@
-"""Fetch and extract primary article text from a public URL."""
+"""Fetch and extract primary article text from a public URL via Jina Reader."""
 
 from __future__ import annotations
 
@@ -7,31 +7,12 @@ import re
 from urllib.parse import urlparse
 
 import httpx
-from bs4 import BeautifulSoup
 
-FETCH_TIMEOUT_SECONDS = 15.0
+JINA_READER_PREFIX = "https://r.jina.ai/"
+FETCH_TIMEOUT_SECONDS = 30.0
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_REDIRECTS = 5
 MIN_EXTRACTED_CHARS = 40
-
-_NOISE_TAGS = (
-    "script",
-    "style",
-    "noscript",
-    "nav",
-    "footer",
-    "aside",
-    "header",
-    "iframe",
-    "form",
-    "button",
-    "svg",
-)
-
-_NOISE_CLASS_RE = re.compile(
-    r"(advert|ads?|sidebar|nav|menu|footer|cookie|promo|social|share|comment)",
-    re.IGNORECASE,
-)
 
 
 class UrlScrapeError(Exception):
@@ -78,59 +59,41 @@ def normalize_and_validate_url(raw_url: str) -> str:
     return url
 
 
-def _strip_noise(soup: BeautifulSoup) -> None:
-    for tag_name in _NOISE_TAGS:
-        for node in soup.find_all(tag_name):
-            node.decompose()
-
-    for node in soup.find_all(True):
-        class_attr = " ".join(node.get("class") or [])
-        id_attr = node.get("id") or ""
-        if _NOISE_CLASS_RE.search(f"{class_attr} {id_attr}"):
-            node.decompose()
-
-
 def _normalize_text(text: str) -> str:
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
     collapsed = "\n".join(line for line in lines if line)
     return collapsed.strip()
 
 
-def extract_article_text(html: str) -> str:
-    soup = BeautifulSoup(html, "html.parser")
-    _strip_noise(soup)
-
-    root = soup.find("article") or soup.find("main") or soup.body or soup
-    text = _normalize_text(root.get_text(separator="\n"))
-
+def _finalize_extracted_text(raw_text: str) -> str:
+    text = _normalize_text(raw_text)
     if len(text) < MIN_EXTRACTED_CHARS:
         raise UrlScrapeError("Could not extract usable article text from the page")
-
     return text
 
 
 async def fetch_and_extract_article_text(url: str) -> str:
     validated_url = normalize_and_validate_url(url)
+    target_endpoint = f"{JINA_READER_PREFIX}{validated_url}"
 
     try:
         async with httpx.AsyncClient(
             follow_redirects=True,
             max_redirects=MAX_REDIRECTS,
             timeout=FETCH_TIMEOUT_SECONDS,
-            headers={"User-Agent": "project-read-scraper/1.0"},
+            headers={
+                "User-Agent": "project-read-scraper/1.0",
+                "Accept": "text/plain, text/markdown, text/*;q=0.9, */*;q=0.8",
+            },
         ) as client:
-            response = await client.get(validated_url)
+            response = await client.get(target_endpoint)
             response.raise_for_status()
-
-            content_type = response.headers.get("content-type", "").lower()
-            if "html" not in content_type and "text/plain" not in content_type:
-                raise UrlScrapeError("URL did not return HTML content")
 
             content = response.content
             if len(content) > MAX_RESPONSE_BYTES:
                 raise UrlScrapeError("Page content exceeds size limit")
 
-            html = response.text
+            text = response.text
     except UrlScrapeError:
         raise
     except httpx.HTTPStatusError as exc:
@@ -138,4 +101,4 @@ async def fetch_and_extract_article_text(url: str) -> str:
     except httpx.RequestError as exc:
         raise UrlScrapeError("Could not reach URL or page is unreachable") from exc
 
-    return extract_article_text(html)
+    return _finalize_extracted_text(text)

@@ -1,4 +1,11 @@
-import { compareTexts, extractTextFromImage, lookupBookText, scrapeUrl } from './api'
+import {
+  compareTexts,
+  extractTextFromImage,
+  generateQuestions,
+  gradeAnswers,
+  lookupBookText,
+  scrapeUrl,
+} from './api'
 
 describe('compareTexts', () => {
   it('returns parsed response on success', async () => {
@@ -299,6 +306,142 @@ describe('scrapeUrl', () => {
     await expect(scrapeUrl('https://example.com/post', 'Introduction')).rejects.toThrow(
       'URL scrape response was missing extracted text',
     )
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('generateQuestions', () => {
+  it('posts JSON and returns questions', async () => {
+    const mockResponse = {
+      questions: [{ question: 'Q1?' }, { question: 'Q2?' }, { question: 'Q3?' }],
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await generateQuestions({
+      source_text: '  Source  ',
+      critique: '  Critique  ',
+      quiz_type: 'remedial',
+      difficulty: 'standard',
+      exclusion_history: ['Old Q?'],
+    })
+
+    expect(result).toEqual(mockResponse)
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/generate-questions')
+    expect(options.method).toBe('POST')
+    expect(options.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(JSON.parse(options.body as string)).toEqual({
+      source_text: 'Source',
+      critique: 'Critique',
+      quiz_type: 'remedial',
+      difficulty: 'standard',
+      exclusion_history: ['Old Q?'],
+    })
+
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when response is invalid', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ questions: [{ question: 'Only one?' }] }),
+      }),
+    )
+
+    await expect(
+      generateQuestions({
+        source_text: 'Source',
+        critique: 'Critique',
+        quiz_type: 'mastery',
+        difficulty: 'advanced',
+      }),
+    ).rejects.toThrow('Generate questions response was missing required question fields')
+
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when request fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ detail: 'Quiz generation failed' }),
+      }),
+    )
+
+    await expect(
+      generateQuestions({
+        source_text: 'Source',
+        critique: 'Critique',
+        quiz_type: 'mastery',
+        difficulty: 'professional',
+      }),
+    ).rejects.toThrow('Quiz generation failed')
+
+    vi.unstubAllGlobals()
+  })
+})
+
+describe('gradeAnswers', () => {
+  it('posts JSON and returns grade results', async () => {
+    const mockResponse = {
+      correct_count: 2,
+      results: [
+        { is_correct: true, feedback: 'Good', hint: 'Hint 1' },
+        { is_correct: false, feedback: 'Miss', hint: 'Hint 2' },
+        { is_correct: true, feedback: 'Solid', hint: 'Hint 3' },
+      ],
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await gradeAnswers({
+      source_text: '  Source  ',
+      questions: ['  Q1?  ', 'Q2?', 'Q3?'],
+      answers: ['  A1  ', 'A2', 'A3'],
+    })
+
+    expect(result).toEqual(mockResponse)
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/grade-answers')
+    expect(JSON.parse(options.body as string)).toEqual({
+      source_text: 'Source',
+      questions: ['Q1?', 'Q2?', 'Q3?'],
+      answers: ['A1', 'A2', 'A3'],
+    })
+
+    vi.unstubAllGlobals()
+  })
+
+  it('throws when grade fields are invalid', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ correct_count: 1, results: [] }),
+      }),
+    )
+
+    await expect(
+      gradeAnswers({
+        source_text: 'Source',
+        questions: ['Q1?', 'Q2?', 'Q3?'],
+        answers: ['A1', 'A2', 'A3'],
+      }),
+    ).rejects.toThrow('Grade answers response was missing required result fields')
 
     vi.unstubAllGlobals()
   })

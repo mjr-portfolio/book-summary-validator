@@ -5,6 +5,10 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from app.schemas.compare import (
     CompareResponse,
     ExtractTextResponse,
+    GenerateQuestionsRequest,
+    GenerateQuestionsResponse,
+    GradeAnswersRequest,
+    GradeAnswersResponse,
     LookupTextResponse,
     ScrapeUrlResponse,
 )
@@ -14,6 +18,8 @@ from app.services.gemini import (
     compare_texts_async,
     extract_text_from_image_async,
     fetch_book_knowledge_summary_async,
+    generate_study_questions_async,
+    grade_study_answers_async,
     scrape_and_filter_article_async,
 )
 from app.services.scraper import UrlScrapeError
@@ -153,5 +159,35 @@ async def scrape_url(
         return ScrapeUrlResponse(extracted_text=extracted)
     except UrlScrapeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GeminiServiceError as exc:
+        _raise_gemini_http_error(exc)
+
+
+@router.post("/generate-questions", response_model=GenerateQuestionsResponse)
+async def generate_questions(payload: GenerateQuestionsRequest) -> GenerateQuestionsResponse:
+    source_text = payload.source_text.strip()
+    critique = payload.critique.strip()
+    exclusion_history = [item.strip() for item in payload.exclusion_history if item.strip()]
+
+    try:
+        return await generate_study_questions_async(
+            source_text,
+            critique,
+            payload.quiz_type,
+            payload.difficulty,
+            exclusion_history,
+        )
+    except GeminiServiceError as exc:
+        _raise_gemini_http_error(exc)
+
+
+@router.post("/grade-answers", response_model=GradeAnswersResponse)
+async def grade_answers(payload: GradeAnswersRequest) -> GradeAnswersResponse:
+    source_text = payload.source_text.strip()
+    questions = [question.strip() for question in payload.questions]
+    answers = [answer.strip() for answer in payload.answers]
+
+    try:
+        return await grade_study_answers_async(source_text, questions, answers)
     except GeminiServiceError as exc:
         _raise_gemini_http_error(exc)

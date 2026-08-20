@@ -11,9 +11,15 @@ from app.prompts import (
     EXTRACT_TEXT_PROMPT,
     build_book_lookup_prompt,
     build_compare_prompt,
+    build_grade_answers_prompt,
     build_section_filter_prompt,
+    build_study_questions_prompt,
 )
-from app.schemas.compare import CompareResponse
+from app.schemas.compare import (
+    CompareResponse,
+    GenerateQuestionsResponse,
+    GradeAnswersResponse,
+)
 from app.services.scraper import UrlScrapeError, fetch_and_extract_article_text
 
 MODEL = "gemini-flash-latest"
@@ -85,20 +91,38 @@ def _normalize_image(image_bytes: bytes) -> tuple[bytes, str]:
         raise GeminiServiceError("Invalid or unsupported image file") from exc
 
 
-def _parse_response(response) -> CompareResponse:
+def _parse_structured_response(response, model_cls):
     if response.parsed is not None:
-        if isinstance(response.parsed, CompareResponse):
-            parsed = response.parsed
-        else:
-            parsed = CompareResponse.model_validate(response.parsed)
-    elif response.text:
-        parsed = CompareResponse.model_validate_json(response.text)
-    else:
-        raise GeminiServiceError("Empty or unparseable response from Gemini API")
+        if isinstance(response.parsed, model_cls):
+            return response.parsed
+        return model_cls.model_validate(response.parsed)
+    if response.text:
+        return model_cls.model_validate_json(response.text)
+    raise GeminiServiceError("Empty or unparseable response from Gemini API")
+
+
+def _parse_response(response) -> CompareResponse:
+    parsed = _parse_structured_response(response, CompareResponse)
 
     if not parsed.critique.strip():
         raise GeminiServiceError("Gemini returned an empty critique")
 
+    return parsed
+
+
+def _parse_generate_questions_response(response) -> GenerateQuestionsResponse:
+    parsed = _parse_structured_response(response, GenerateQuestionsResponse)
+    if len(parsed.questions) != 3:
+        raise GeminiServiceError("Gemini did not return exactly 3 study questions")
+    if any(not item.question.strip() for item in parsed.questions):
+        raise GeminiServiceError("Gemini returned an empty study question")
+    return parsed
+
+
+def _parse_grade_answers_response(response) -> GradeAnswersResponse:
+    parsed = _parse_structured_response(response, GradeAnswersResponse)
+    if len(parsed.results) != 3:
+        raise GeminiServiceError("Gemini did not return exactly 3 grade results")
     return parsed
 
 
@@ -218,3 +242,79 @@ def filter_scraped_text_by_section(scraped_text: str, section_filter: str) -> st
 async def scrape_and_filter_article_async(url: str, section_filter: str) -> str:
     scraped_text = await fetch_and_extract_article_text(url)
     return await asyncio.to_thread(filter_scraped_text_by_section, scraped_text, section_filter)
+
+
+@_wrap_gemini_errors
+def generate_study_questions(
+    source_text: str,
+    critique: str,
+    quiz_type: str,
+    difficulty: str,
+    exclusion_history: list[str] | None = None,
+) -> GenerateQuestionsResponse:
+    client = _get_client()
+    prompt = build_study_questions_prompt(
+        source_text,
+        critique,
+        quiz_type,
+        difficulty,
+        exclusion_history,
+    )
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=GenerateQuestionsResponse,
+        ),
+    )
+    return _parse_generate_questions_response(response)
+
+
+async def generate_study_questions_async(
+    source_text: str,
+    critique: str,
+    quiz_type: str,
+    difficulty: str,
+    exclusion_history: list[str] | None = None,
+) -> GenerateQuestionsResponse:
+    return await asyncio.to_thread(
+        generate_study_questions,
+        source_text,
+        critique,
+        quiz_type,
+        difficulty,
+        exclusion_history,
+    )
+
+
+@_wrap_gemini_errors
+def grade_study_answers(
+    source_text: str,
+    questions: list[str],
+    answers: list[str],
+) -> GradeAnswersResponse:
+    client = _get_client()
+    prompt = build_grade_answers_prompt(source_text, questions, answers)
+    response = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=GradeAnswersResponse,
+        ),
+    )
+    return _parse_grade_answers_response(response)
+
+
+async def grade_study_answers_async(
+    source_text: str,
+    questions: list[str],
+    answers: list[str],
+) -> GradeAnswersResponse:
+    return await asyncio.to_thread(
+        grade_study_answers,
+        source_text,
+        questions,
+        answers,
+    )
