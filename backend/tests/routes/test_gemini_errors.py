@@ -88,3 +88,48 @@ def test_extract_text_endpoint_maps_gemini_errors(
         )
 
     assert response.status_code == expected_status
+
+
+def test_generate_questions_endpoint_maps_503_without_live_gemini(client) -> None:
+    with patch(
+        "app.routes.compare.generate_study_questions_async",
+        new_callable=AsyncMock,
+        side_effect=GeminiServiceError("503 service unavailable"),
+    ) as mock_generate:
+        response = client.post(
+            "/api/generate-questions",
+            json={
+                "source_text": "Source text",
+                "critique": "Critique text",
+                "quiz_type": "remedial",
+                "difficulty": "standard",
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Upstream Gemini service unavailable. Please try again later."
+    )
+    mock_generate.assert_awaited_once()
+
+
+def test_grade_answers_endpoint_maps_503_without_live_gemini(client) -> None:
+    with patch(
+        "app.routes.compare.grade_study_answers_async",
+        new_callable=AsyncMock,
+        side_effect=GeminiServiceError("503 service unavailable"),
+    ) as mock_grade:
+        response = client.post(
+            "/api/grade-answers",
+            json={
+                "source_text": "Source text",
+                "questions": ["Q1?", "Q2?", "Q3?"],
+                "answers": ["A1", "A2", "A3"],
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == (
+        "Upstream Gemini service unavailable. Please try again later."
+    )
+    mock_grade.assert_awaited_once()

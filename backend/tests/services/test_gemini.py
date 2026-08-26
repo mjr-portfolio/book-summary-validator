@@ -405,6 +405,40 @@ def test_generate_study_questions_raises_on_empty_response() -> None:
             generate_study_questions("Source", "Critique", "remedial", "standard")
 
 
+def test_generate_study_questions_raises_on_wrong_count() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = GenerateQuestionsResponse.model_construct(
+        questions=[StudyQuestion(question="Only one?")]
+    )
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="exactly 3 study questions"):
+            generate_study_questions("Source", "Critique", "remedial", "standard")
+
+
+def test_generate_study_questions_raises_on_empty_question() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = GenerateQuestionsResponse.model_construct(
+        questions=[
+            StudyQuestion(question="Q1?"),
+            StudyQuestion.model_construct(question="   "),
+            StudyQuestion(question="Q3?"),
+        ]
+    )
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="empty study question"):
+            generate_study_questions("Source", "Critique", "remedial", "standard")
+
+
 def test_grade_study_answers_returns_parsed_response() -> None:
     mock_response = MagicMock()
     mock_response.parsed = GradeAnswersResponse(
@@ -444,14 +478,117 @@ def test_grade_study_answers_raises_on_empty_response() -> None:
             grade_study_answers("Source", ["Q1?", "Q2?", "Q3?"], ["A1", "A2", "A3"])
 
 
+def test_grade_study_answers_raises_on_wrong_count() -> None:
+    mock_response = MagicMock()
+    mock_response.parsed = GradeAnswersResponse.model_construct(
+        results=[
+            GradeAnswerResult(is_correct=True, feedback="Good", hint="Hint 1"),
+        ],
+        correct_count=1,
+    )
+    mock_response.text = None
+
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value = mock_response
+
+    with patch("app.services.gemini._get_client", return_value=mock_client):
+        with pytest.raises(GeminiServiceError, match="exactly 3 grade results"):
+            grade_study_answers("Source", ["Q1?", "Q2?", "Q3?"], ["A1", "A2", "A3"])
+
+
+def test_generate_study_questions_async_delegates_to_sync() -> None:
+    from app.services.gemini import generate_study_questions_async
+
+    expected = GenerateQuestionsResponse(
+        questions=[
+            StudyQuestion(question="Theme?"),
+            StudyQuestion(question="Character?"),
+            StudyQuestion(question="Conflict?"),
+        ]
+    )
+
+    with patch(
+        "app.services.gemini.generate_study_questions",
+        return_value=expected,
+    ) as mock_generate:
+        result = asyncio.run(
+            generate_study_questions_async(
+                "Source",
+                "Critique",
+                "remedial",
+                "standard",
+                ["Old Q?"],
+            )
+        )
+
+    assert result == expected
+    mock_generate.assert_called_once_with(
+        "Source",
+        "Critique",
+        "remedial",
+        "standard",
+        ["Old Q?"],
+    )
+
+
+def test_grade_study_answers_async_delegates_to_sync() -> None:
+    from app.services.gemini import grade_study_answers_async
+
+    expected = GradeAnswersResponse(
+        results=[
+            GradeAnswerResult(is_correct=True, feedback="Good", hint="Hint 1"),
+            GradeAnswerResult(is_correct=False, feedback="Miss", hint="Hint 2"),
+            GradeAnswerResult(is_correct=True, feedback="Solid", hint="Hint 3"),
+        ],
+        correct_count=2,
+    )
+
+    with patch(
+        "app.services.gemini.grade_study_answers",
+        return_value=expected,
+    ) as mock_grade:
+        result = asyncio.run(
+            grade_study_answers_async(
+                "Source",
+                ["Q1?", "Q2?", "Q3?"],
+                ["A1", "A2", "A3"],
+            )
+        )
+
+    assert result == expected
+    mock_grade.assert_called_once_with(
+        "Source",
+        ["Q1?", "Q2?", "Q3?"],
+        ["A1", "A2", "A3"],
+    )
+
+
 def test_compare_texts_live_integration() -> None:
+    if os.getenv("RUN_LIVE_GEMINI", "").lower() not in {"1", "true", "yes"}:
+        pytest.skip("Live Gemini integration disabled (set RUN_LIVE_GEMINI=1 to enable)")
+
     if not (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")):
         pytest.skip("No Gemini API key configured")
 
-    result = compare_texts(
-        book_text="The dragon guarded a mountain of gold. A knight arrived to negotiate peace.",
-        user_summary="A knight meets a dragon protecting treasure and tries diplomacy instead of fighting.",
-    )
+    try:
+        result = compare_texts(
+            book_text=(
+                "The dragon guarded a mountain of gold. "
+                "A knight arrived to negotiate peace."
+            ),
+            user_summary=(
+                "A knight meets a dragon protecting treasure and "
+                "tries diplomacy instead of fighting."
+            ),
+        )
+    except GeminiServiceError as exc:
+        message = str(exc).lower()
+        if any(
+            token in message
+            for token in ("503", "429", "quota", "unavailable", "timeout", "rate limit")
+        ):
+            pytest.skip(f"Live Gemini unavailable: {exc}")
+        raise
 
     assert isinstance(result, CompareResponse)
     assert 0 <= result.match_percentage <= 100
