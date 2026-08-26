@@ -362,7 +362,9 @@ def test_generate_questions_endpoint_returns_result(client, mock_generate_study_
     data = response.json()
     assert len(data["questions"]) == 3
     assert data["questions"][0]["question"] == "What is the main theme?"
-    mock_generate_study_questions.assert_called_once_with(
+    assert data["questions"][1]["question"] == "Who is the protagonist?"
+    assert data["questions"][2]["question"] == "What conflict drives the plot?"
+    mock_generate_study_questions.assert_awaited_once_with(
         "A hero journeys across the land.",
         "Missed the journey motif.",
         "remedial",
@@ -387,7 +389,7 @@ def test_generate_questions_endpoint_strips_and_filters_history(
     )
 
     assert response.status_code == 200
-    mock_generate_study_questions.assert_called_once_with(
+    mock_generate_study_questions.assert_awaited_once_with(
         "Source text",
         "Critique text",
         "mastery",
@@ -397,17 +399,24 @@ def test_generate_questions_endpoint_strips_and_filters_history(
 
 
 def test_generate_questions_endpoint_rejects_invalid_payload(client) -> None:
-    response = client.post(
-        "/api/generate-questions",
-        json={
-            "source_text": "",
-            "critique": "Critique",
-            "quiz_type": "remedial",
-            "difficulty": "standard",
-        },
-    )
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.routes.compare.generate_study_questions_async",
+        new_callable=AsyncMock,
+    ) as mock_generate:
+        response = client.post(
+            "/api/generate-questions",
+            json={
+                "source_text": "",
+                "critique": "Critique",
+                "quiz_type": "remedial",
+                "difficulty": "standard",
+            },
+        )
 
     assert response.status_code == 422
+    mock_generate.assert_not_called()
 
 
 def test_grade_answers_endpoint_returns_result(client, mock_grade_study_answers) -> None:
@@ -424,7 +433,12 @@ def test_grade_answers_endpoint_returns_result(client, mock_grade_study_answers)
     data = response.json()
     assert data["correct_count"] == 2
     assert len(data["results"]) == 3
-    mock_grade_study_answers.assert_called_once_with(
+    assert data["results"][0] == {
+        "is_correct": True,
+        "feedback": "Accurate.",
+        "hint": "Keep reviewing themes.",
+    }
+    mock_grade_study_answers.assert_awaited_once_with(
         "Source text",
         ["Q1?", "Q2?", "Q3?"],
         ["A1", "A2", "A3"],
@@ -432,13 +446,20 @@ def test_grade_answers_endpoint_returns_result(client, mock_grade_study_answers)
 
 
 def test_grade_answers_endpoint_rejects_empty_answers(client) -> None:
-    response = client.post(
-        "/api/grade-answers",
-        json={
-            "source_text": "Source text",
-            "questions": ["Q1?", "Q2?", "Q3?"],
-            "answers": ["A1", "   ", "A3"],
-        },
-    )
+    from unittest.mock import AsyncMock, patch
+
+    with patch(
+        "app.routes.compare.grade_study_answers_async",
+        new_callable=AsyncMock,
+    ) as mock_grade:
+        response = client.post(
+            "/api/grade-answers",
+            json={
+                "source_text": "Source text",
+                "questions": ["Q1?", "Q2?", "Q3?"],
+                "answers": ["A1", "   ", "A3"],
+            },
+        )
 
     assert response.status_code == 422
+    mock_grade.assert_not_called()

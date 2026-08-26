@@ -42,7 +42,7 @@ const App = () => {
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const extractionRequestId = useRef(0)
-  const resultsRef = useRef<HTMLElement | null>(null)
+  const resultsRef = useRef<HTMLDivElement | null>(null)
   const quizRef = useRef<HTMLDivElement | null>(null)
 
   const [askedQuestionHistory, setAskedQuestionHistory] = useState<string[]>([])
@@ -471,18 +471,19 @@ const App = () => {
         )}
 
         {result && (
-          <section
-            ref={resultsRef}
-            aria-live="polite"
-            className="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
-          >
-            <h2 className="text-lg font-semibold text-gray-900">Results</h2>
-            <p className="mt-3 text-4xl font-bold text-indigo-600">
-              {result.match_percentage.toFixed(1)}%
-            </p>
-            <p className="mt-1 text-sm text-gray-500">Conceptual match</p>
-            <p className="mt-4 text-gray-700">{result.critique}</p>
-          </section>
+          <div ref={resultsRef}>
+            <section
+              aria-live="polite"
+              className="mt-6 rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+            >
+              <h2 className="text-lg font-semibold text-gray-900">Results</h2>
+              <p className="mt-3 text-4xl font-bold text-indigo-600">
+                {result.match_percentage.toFixed(1)}%
+              </p>
+              <p className="mt-1 text-sm text-gray-500">Conceptual match</p>
+              <p className="mt-4 text-gray-700">{result.critique}</p>
+            </section>
+          </div>
         )}
 
         {result && !quizQuestions && (

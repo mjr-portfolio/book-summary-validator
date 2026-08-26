@@ -20,7 +20,7 @@ from app.schemas.compare import (
     GenerateQuestionsResponse,
     GradeAnswersResponse,
 )
-from app.services.scraper import UrlScrapeError, fetch_and_extract_article_text
+from app.services.scraper import fetch_and_extract_article_text
 
 MODEL = "gemini-flash-latest"
 MAX_IMAGE_DIMENSION = 4096
