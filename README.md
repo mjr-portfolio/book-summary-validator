@@ -9,9 +9,9 @@
   <img alt="Vitest 99.3% Coverage" src="https://img.shields.io/badge/Vitest-99.3%25_Coverage-16A34A?style=flat-square&logo=vitest&logoColor=white" />
 </p>
 
-# Project Read
+# Book Summary Validator
 
-An adaptive, AI-driven full-stack reading comprehension utility that scores a learner’s summary against source material with semantic precision. Built for rigorous self-study loops, ingesting text from multiple channels, receiving a structured critique, then closing knowledge gaps through contextual quiz generation and asynchronous grading.
+An adaptive, AI-driven full-stack reading comprehension utility that scores a learner’s summary against source material with semantic precision. Built for self-study loops, ingesting text from multiple channels, receiving a structured critique, then closing knowledge gaps through contextual quiz generation and asynchronous grading.
 
 ## Core Feature Showcase
 
