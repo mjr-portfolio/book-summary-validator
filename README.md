@@ -13,7 +13,15 @@
 
 An adaptive, AI-driven full-stack reading comprehension utility that scores a learner’s summary against source material with semantic precision. Built for self-study loops, ingesting text from multiple channels, receiving a structured critique, then closing knowledge gaps through contextual quiz generation and asynchronous grading.
 
+<p align="center">
+  <img src="assets/screenshots/hero-comparison-dashboard.png" alt="Book Summary Validator Main Dashboard" width="100%" />
+</p>
+
 ## Core Feature Showcase
+
+| Photo Vision OCR (Asynchronous Pre-Extraction) | Conditional Book Lookup Validation |
+| :---: | :---: |
+| <img src="assets/screenshots/photo-upload-ocr.png" alt="Photo Upload OCR Pre-extraction" width="100%"/> | <img src="assets/screenshots/book-lookup-validation.png" alt="Book Lookup Input Validation" width="100%"/> |
 
 - **Text** - Paste source material and a personal summary; Gemini performs semantic comparison and returns a match percentage plus structural critique.
 - **Photo** - Upload a page image; client-side HTML5 Canvas compression reduces payload size before Gemini vision OCR extracts the underlying text.
@@ -21,6 +29,10 @@ An adaptive, AI-driven full-stack reading comprehension utility that scores a le
 - **Article URL** - Scrape public articles through Jina AI Reader to bypass common bot blocks, then optionally filter to a named section before comparison.
 
 ## The Active Learning Engine
+
+<p align="center">
+  <img src="assets/screenshots/adaptive-study-quiz.png" alt="Generated Adaptive Study Quiz" width="100%" />
+</p>
 
 After comparison, the application branches into an adaptive study path driven by the match score:
 
@@ -30,6 +42,14 @@ After comparison, the application branches into an adaptive study path driven by
 | **Mastery Challenge** | Match ≥ 70% | Gamified quiz with Standard / Advanced / Professional difficulty |
 
 Questions are generated from the active source text and critique context, with exclusion history to avoid repeats. Free-response answers are graded asynchronously via Gemini semantic evaluation, not brittle string matching, returning per-question correctness and aggregate score.
+
+## Mobile Responsive Interface
+
+<p align="center">
+  <img src="assets/screenshots/mobile-responsive-view.png" alt="Mobile Responsive View" width="45%" />
+</p>
+
+Designed mobile-first using Tailwind CSS utility patterns to preserve tap targets, stack dual-pane text inputs cleanly, and keep asynchronous state indicators visible across small viewports.
 
 ## Technical Architecture Summary
 
@@ -119,3 +139,4 @@ SPA serves at `http://localhost:5173`. CORS is preconfigured for local Vite orig
 - [ ] **Relational Database Integration** - Add a local database layer (like SQLite or PostgreSQL using SQLAlchemy) to actually persist user profiles and save quiz scores over time, instead of resetting states on page refresh.
 - [ ] **Custom Section Parser Customisation** - Expand our mandatory section input field into a multi-select filter, allowing a student to check boxes for multiple chapters or headings at once on a website before firing the extraction loop.
 - [ ] **User-Defined Summary Target Settings** - Allow the user to manually configure their target match threshold (e.g., setting an exact pass rate slider between 60% and 90%) to alter how strictly the grading engine evaluates their text.
+- [ ] **Native Mobile Application (React Native / Expo)** - Develop a dedicated native mobile app to replace the responsive web layout, unlocking direct hardware access for instant camera document scanning, native OCR processing, and offline study loops.
